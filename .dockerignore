@@ -1,0 +1,43 @@
+# Git & VCS
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Dev/Agent dosyaları
+CLAUDE.md
+AGENT_DIRECTIVES.md
+REHBER.md
+evr_bot_teknik_ozet.md
+_browser_data/
+_browser_data_hist/
+tmp/
+hist_page.png
+*.log
+
+# Scraper (production'da gereksiz)
+agent_scraper.py
+historical_data_fetcher.py
+
+# Yerel DB (production'da PostgreSQL kullanÄ±lacak)
+evr_bot.db
+.fernet_key
+.env
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

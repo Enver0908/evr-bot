@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVR Trading Platform — Kantitatif BTC/USDT Strateji</title>
+    <meta name="description" content="EVR Trading Platform - 4 durumlu kantitatif BTC/USDT alim-satim strateji platformu. MA_600 korumali, EVR endeks tabanli.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- ═══════════════ AUTH SCREEN ═══════════════ -->
+    <div id="auth-screen" class="screen active">
+        <div class="auth-bg">
+            <div class="auth-glow glow-1"></div>
+            <div class="auth-glow glow-2"></div>
+            <div class="auth-glow glow-3"></div>
+        </div>
+        <div class="auth-container">
+            <div class="auth-logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 48 48" fill="none">
+                        <defs>
+                            <linearGradient id="lg1" x1="0" y1="0" x2="48" y2="48">
+                                <stop offset="0%" stop-color="#818cf8"/>
+                                <stop offset="50%" stop-color="#06b6d4"/>
+                                <stop offset="100%" stop-color="#10b981"/>
+                            </linearGradient>
+                            <linearGradient id="lg2" x1="10" y1="10" x2="38" y2="38">
+                                <stop offset="0%" stop-color="#a78bfa"/>
+                                <stop offset="100%" stop-color="#22d3ee"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M24 4L42 14V34L24 44L6 34V14L24 4Z" stroke="url(#lg1)" stroke-width="2" fill="none"/>
+                        <path d="M24 12L34 18V30L24 36L14 30V18L24 12Z" fill="url(#lg2)" opacity="0.15"/>
+                        <path d="M24 17L30 20.5V27.5L24 31L18 27.5V20.5L24 17Z" fill="url(#lg2)"/>
+                    </svg>
+                </div>
+                <h1>EVR Trading</h1>
+                <p class="auth-subtitle">Kantitatif BTC/USDT Strateji Platformu</p>
+            </div>
+
+            <div class="auth-card">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" data-tab="login" id="tab-login">Giris Yap</button>
+                    <button class="auth-tab" data-tab="register" id="tab-register">Kayit Ol</button>
+                </div>
+
+                <form id="login-form" class="auth-form active">
+                    <div class="form-group">
+                        <label for="login-email">E-posta</label>
+                        <input type="email" id="login-email" placeholder="ornek@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Sifre</label>
+                        <input type="password" id="login-password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full" id="btn-login">
+                        <span>Giris Yap</span>
+                        <div class="btn-loader hidden"></div>
+                    </button>
+                </form>
+
+                <form id="register-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="reg-email">E-posta</label>
+                        <input type="email" id="reg-email" placeholder="ornek@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">Sifre</label>
+                        <input type="password" id="reg-password" placeholder="••••••••" minlength="8" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full" id="btn-register">
+                        <span>Kayit Ol</span>
+                        <div class="btn-loader hidden"></div>
+                    </button>
+                </form>
+
+                <div id="auth-error" class="error-msg hidden"></div>
+            </div>
+
+            <p class="auth-footer">4 Durumlu Durum Makinesi &bull; MA_600 Korumasi &bull; EVR Endeks Tabanli</p>
+        </div>
+    </div>
+
+    <!-- ═══════════════ DASHBOARD SCREEN ═══════════════ -->
+    <div id="dashboard-screen" class="screen">
+        <!-- Top Nav -->
+        <nav class="top-nav" id="top-nav">
+            <div class="nav-left">
+                <div class="nav-logo">
+                    <svg viewBox="0 0 48 48" fill="none" width="28" height="28">
+                        <defs>
+                            <linearGradient id="lg3" x1="0" y1="0" x2="48" y2="48">
+                                <stop offset="0%" stop-color="#818cf8"/>
+                                <stop offset="100%" stop-color="#22d3ee"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M24 4L42 14V34L24 44L6 34V14L24 4Z" stroke="url(#lg3)" stroke-width="2" fill="none"/>
+                        <path d="M24 17L30 20.5V27.5L24 31L18 27.5V20.5L24 17Z" fill="url(#lg3)"/>
+                    </svg>
+                    <span>EVR Trading</span>
+                </div>
+                <div class="nav-tabs">
+                    <button class="nav-tab active" data-screen="dashboard" id="nav-tab-dashboard">Dashboard</button>
+                    <button class="nav-tab" data-screen="backtest" id="nav-tab-backtest">Backtest</button>
+                </div>
+            </div>
+            <div class="nav-right">
+                <span id="nav-email" class="nav-email"></span>
+                <div id="nav-sub-badge" class="sub-badge inactive">Inaktif</div>
+                <button id="btn-logout" class="btn btn-ghost btn-sm">Cikis</button>
+            </div>
+        </nav>
+
+        <!-- ═══════════ DASHBOARD CONTENT ═══════════ -->
+        <main class="dashboard-main" id="dashboard-content">
+            <section class="cards-row" id="status-cards">
+                <div class="stat-card evr-card" id="card-evr">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-label">EVR Endeksi</div>
+                    <div class="stat-value" id="stat-evr">—</div>
+                    <div class="stat-sub" id="stat-evr-label">Veri bekleniyor</div>
+                    <div class="evr-bar-container"><div class="evr-bar" id="evr-bar"></div></div>
+                </div>
+                <div class="stat-card" id="card-btc">
+                    <div class="stat-icon">₿</div>
+                    <div class="stat-label">BTC Fiyat</div>
+                    <div class="stat-value" id="stat-btc">—</div>
+                    <div class="stat-sub">BTC/USDT Spot</div>
+                </div>
+                <div class="stat-card" id="card-ma">
+                    <div class="stat-icon">📈</div>
+                    <div class="stat-label">MA 600</div>
+                    <div class="stat-value" id="stat-ma600">—</div>
+                    <div class="stat-sub">600 Gunluk Ortalama</div>
+                </div>
+                <div class="stat-card" id="card-state">
+                    <div class="stat-icon">🛡️</div>
+                    <div class="stat-label">Bot Durumu</div>
+                    <div class="stat-value" id="stat-state">—</div>
+                    <div class="stat-sub" id="stat-state-label">Durum bekleniyor</div>
+                </div>
+            </section>
+
+            <section class="panel panel-chart" id="chart-section">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span class="title-glow">EVR Total Map</span></h2>
+                    <div class="chart-controls">
+                        <button class="chart-range-btn" data-range="365">1Y</button>
+                        <button class="chart-range-btn" data-range="730">2Y</button>
+                        <button class="chart-range-btn" data-range="1095">3Y</button>
+                        <button class="chart-range-btn active" data-range="0">ALL</button>
+                        <button class="chart-zoom-reset hidden" id="btn-zoom-reset" title="Zoom'u Sifirla">⟲ Reset</button>
+                    </div>
+                </div>
+                <div class="chart-legend" id="chart-legend">
+                    <span class="legend-item"><span class="legend-color" style="background:#e8962e"></span>BTC Fiyat</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#e2e8f0"></span>MA 600</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#2dd4bf"></span>EVR Endeksi</span>
+                </div>
+                <div class="chart-container" id="chart-container">
+                    <div class="chart-loading" id="chart-loading"><div class="spinner"></div><span>Grafik verileri yukleniyor...</span></div>
+                    <canvas id="evr-chart"></canvas>
+                </div>
+                <div class="chart-tooltip" id="chart-tooltip">
+                    <div class="tooltip-date" id="tooltip-date"></div>
+                    <div class="tooltip-row"><span class="tooltip-dot" style="background:#e8962e"></span><span>BTC:</span><strong id="tooltip-btc"></strong></div>
+                    <div class="tooltip-row"><span class="tooltip-dot" style="background:#e2e8f0"></span><span>MA600:</span><strong id="tooltip-ma"></strong></div>
+                    <div class="tooltip-row"><span class="tooltip-dot" style="background:#2dd4bf"></span><span>EVR:</span><strong id="tooltip-evr"></strong></div>
+                </div>
+            </section>
+
+            <section class="mid-row">
+                <div class="panel panel-strategy" id="strategy-panel">
+                    <h2 class="panel-title">Strateji Kurallari</h2>
+                    <div class="strategy-why">
+                        <div class="why-badge" id="why-badge">BEKLE</div>
+                        <p class="why-text" id="why-text">Bot durumu yukleniyor...</p>
+                    </div>
+                    <div class="strategy-rules">
+                        <div class="rule-item rule-buy"><div class="rule-threshold">EVR ≤ 3.2</div><div class="rule-action">AL</div><div class="rule-detail">Kasanin %2'si ile BTC al</div></div>
+                        <div class="rule-item rule-neutral"><div class="rule-threshold">3.2 < EVR < 8.5</div><div class="rule-action">BEKLE</div><div class="rule-detail">Islem yapma, gozle</div></div>
+                        <div class="rule-item rule-sell"><div class="rule-threshold">EVR ≥ 8.5</div><div class="rule-action">SAT</div><div class="rule-detail">BTC'nin %15'ini sat</div></div>
+                    </div>
+                    <div class="strategy-shield"><h3>MA_600 Kalkani</h3><p>Fiyat 600 gunluk ortalamanin altina dustugunde tum BTC satilir ve nakit moduna gecilir.</p></div>
+                </div>
+                <div class="panel panel-states" id="states-panel">
+                    <h2 class="panel-title">Durum Makinesi</h2>
+                    <div class="state-machine-visual">
+                        <div class="state-node" id="sn-normal"><div class="state-num">1</div><div class="state-name">NORMAL</div><div class="state-desc">Fiyat &gt; MA600</div><div class="state-detail">EVR kurallari aktif</div></div>
+                        <div class="state-connector"><div class="connector-line"></div><div class="connector-label">Fiyat &lt; MA600</div></div>
+                        <div class="state-node" id="sn-shield"><div class="state-num">2</div><div class="state-name">SHIELD</div><div class="state-desc">Nakit Modu</div><div class="state-detail">Tum BTC satildi</div></div>
+                        <div class="state-connector"><div class="connector-line"></div><div class="connector-label">EVR=0 veya %45 dip</div></div>
+                        <div class="state-node" id="sn-blind"><div class="state-num">3</div><div class="state-name">BLIND</div><div class="state-desc">Dipten Uyanis</div><div class="state-detail">MA devre disi, EVR aktif</div></div>
+                        <div class="state-connector state-restore"><div class="connector-line restore-line"></div><div class="connector-label">ATH'ye ulasti</div></div>
+                        <div class="state-node restore-node" id="sn-restore"><div class="state-num">4</div><div class="state-name">RESTORE</div><div class="state-desc">Kalkan Kuruldu</div><div class="state-detail">Normal'e donus</div></div>
+                    </div>
+                    <div class="state-info">
+                        <div class="info-row"><span class="info-label">ATH (Zirve):</span><span class="info-value" id="info-ath">—</span></div>
+                        <div class="info-row"><span class="info-label">Kirilim Fiyati:</span><span class="info-value" id="info-breakdown">—</span></div>
+                        <div class="info-row"><span class="info-label">Son Calisma:</span><span class="info-value" id="info-lastrun">—</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bottom-row">
+                <div class="panel panel-settings" id="settings-panel">
+                    <h2 class="panel-title">Ayarlar</h2>
+                    <div class="settings-section"><h3>Abonelik</h3><div class="sub-status-row"><span id="sub-status-text">Inaktif</span><button id="btn-sub-toggle" class="btn btn-sm btn-accent">Aktif Et</button></div></div>
+                    <div class="settings-section">
+                        <h3>Bybit API Anahtarlari</h3>
+                        <div id="api-keys-status" class="api-status"><span class="api-dot red"></span><span>Tanimlanmadi</span></div>
+                        <div class="form-group"><label for="input-api-key">API Key</label><input type="password" id="input-api-key" placeholder="Bybit API Key"></div>
+                        <div class="form-group"><label for="input-api-secret">API Secret</label><input type="password" id="input-api-secret" placeholder="Bybit API Secret"></div>
+                        <div class="btn-row"><button id="btn-save-keys" class="btn btn-sm btn-primary">Kaydet</button><button id="btn-delete-keys" class="btn btn-sm btn-danger">Sil</button></div>
+                    </div>
+                </div>
+                <div class="panel panel-trades" id="trades-panel">
+                    <h2 class="panel-title">Son Islemler</h2>
+                    <div class="table-wrap">
+                        <table class="trades-table">
+                            <thead><tr><th>Tarih</th><th>Islem</th><th>Yon</th><th>BTC</th><th>USDT</th><th>Fiyat</th><th>EVR</th><th>Not</th></tr></thead>
+                            <tbody id="trades-body"><tr><td colspan="8" class="empty-row">Henuz islem yok</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- ═══════════ BACKTEST CONTENT ═══════════ -->
+        <main class="dashboard-main hidden" id="backtest-content">
+            <section class="panel bt-input-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title"><span class="title-glow">⚡ Strateji Backtest Simulatoru</span></h2>
+                </div>
+                <p class="bt-description">Tarih araligi ve baslangic sermayesi belirleyerek EVR stratejisinin tarihsel performansini test edin. Sistem, gercek trading motorundaki ayni 4 durumlu durum makinesi mantigi ile simulasyon yapar.</p>
+                <div class="bt-form">
+                    <div class="bt-form-row">
+                        <div class="form-group"><label for="bt-start-date">Baslangic Tarihi</label><input type="date" id="bt-start-date" value="2021-05-01" min="2021-05-01"></div>
+                        <div class="form-group"><label for="bt-end-date">Bitis Tarihi</label><input type="date" id="bt-end-date"></div>
+                        <div class="form-group"><label for="bt-capital">Baslangic Sermayesi (USDT)</label><input type="number" id="bt-capital" value="10000" min="100" step="100"></div>
+                        <div class="form-group bt-form-btn"><button id="btn-run-backtest" class="btn btn-primary"><span>⚡ Simulasyonu Baslat</span><div class="btn-loader hidden"></div></button></div>
+                    </div>
+                </div>
+            </section>
+
+            <div id="bt-results" class="hidden">
+                <section class="bt-summary-cards" id="bt-summary">
+                    <div class="stat-card bt-card-pnl" id="bt-card-pnl"><div class="stat-icon">💰</div><div class="stat-label">Net Kar/Zarar</div><div class="stat-value" id="bt-pnl">—</div><div class="stat-sub" id="bt-pnl-pct">—</div></div>
+                    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-label">Toplam Islem</div><div class="stat-value" id="bt-total-trades">—</div><div class="stat-sub" id="bt-buy-sell">—</div></div>
+                    <div class="stat-card"><div class="stat-icon">📉</div><div class="stat-label">Max Drawdown</div><div class="stat-value" id="bt-drawdown">—</div><div class="stat-sub">En yuksek erime</div></div>
+                    <div class="stat-card"><div class="stat-icon">₿</div><div class="stat-label">Buy &amp; Hold</div><div class="stat-value" id="bt-buyhold">—</div><div class="stat-sub">Sadece BTC tutsaydiniz</div></div>
+                </section>
+
+                <section class="panel" id="bt-equity-panel">
+                    <h2 class="panel-title"><span class="title-glow">Portfoy Degeri (Equity Curve)</span></h2>
+                    <div class="chart-container" id="bt-equity-container"><canvas id="bt-equity-chart"></canvas></div>
+                </section>
+
+                <section class="panel" id="bt-timeline-panel">
+                    <h2 class="panel-title">Durum Makinesi Zaman Cizelgesi</h2>
+                    <div class="bt-timeline" id="bt-timeline"></div>
+                </section>
+
+                <section class="panel hidden" id="bt-warnings-panel">
+                    <h2 class="panel-title">⚠️ Uyarilar</h2>
+                    <div class="bt-warnings" id="bt-warnings"></div>
+                </section>
+
+                <section class="panel" id="bt-trades-panel">
+                    <h2 class="panel-title">Islem Detaylari</h2>
+                    <div class="table-wrap">
+                        <table class="trades-table">
+                            <thead><tr><th>Tarih</th><th>Islem</th><th>Yon</th><th>BTC</th><th>USDT</th><th>Fiyat</th><th>EVR</th><th>Durum</th><th>Not</th></tr></thead>
+                            <tbody id="bt-trades-body"><tr><td colspan="9" class="empty-row">Simulasyon bekleniyor...</td></tr></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <footer class="site-footer">
+            <span>EVR Trading Platform &bull; 4 Durumlu Kantitatif Strateji &bull; MA_600 Korumali</span>
+        </footer>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Chart.js v4 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <!-- Zoom Plugin (Drag-to-Zoom) -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>

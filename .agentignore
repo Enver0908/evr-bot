@@ -1,0 +1,60 @@
+# ═══════════════════════════════════════════════════════
+# EVR Bot — Agent Ignore (Performans Optimizasyonu)
+# ═══════════════════════════════════════════════════════
+# Bu dosyadaki pattern'ler AI ajaninin taramamasi
+# gereken agir/gereksiz dosyalari tanimlar.
+
+# Buyuk veri dosyalari
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+
+# Log dosyalari
+*.log
+scraper.log
+historical_fetcher.log
+daily_updater.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Tarayici verileri (Playwright)
+_browser_data/
+_browser_data_hist/
+
+# Debug dosyalari
+debug_*.png
+debug_*.html
+hist_page.png
+
+# Gecici dosyalar
+tmp/
+
+# Node modules (eger varsa)
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+
+# Git
+.git/
+
+# Arşivlenmiş Testler (AI tarafından taranmayacak)
+_archive_tests/

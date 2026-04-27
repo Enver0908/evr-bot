@@ -1,0 +1,115 @@
+# ═══════════════════════════════════════════════════════════════
+# EVR Trading Bot — Docker Compose (Production)
+# ═══════════════════════════════════════════════════════════════
+# Servisler:
+#   1. web      — FastAPI (Uvicorn) web arayüzü + REST API
+#   2. bot      — 24 saat döngüde çalışan trading engine
+#   3. db       — PostgreSQL veritabanı
+#   4. updater  — SQL veritabanını günlük güncelleyen servis
+#   5. tunnel   — Cloudflare Tunnel (ücretsiz public URL)
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ─── PostgreSQL ──────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: evr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD tanimli degil! .env dosyasini kontrol edin.}
+      POSTGRES_DB: evr_bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evr -d evr_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── FastAPI Web Sunucusu ────────────────────────────────────
+  web:
+    build: .
+    restart: always
+    command: >
+      python -m uvicorn evr_bot.app:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 1
+      --log-level info
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATABASE_URL: postgresql://evr:${POSTGRES_PASSWORD}@db:5432/evr_bot
+      EVR_SECRET_KEY: ${EVR_SECRET_KEY:?EVR_SECRET_KEY tanimli degil!}
+      EVR_FERNET_KEY: ${EVR_FERNET_KEY:?EVR_FERNET_KEY tanimli degil!}
+      ENVIRONMENT: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      DATA_DIR: /app/data
+    volumes:
+      - appdata:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ─── Trading Bot (Scheduler) ────────────────────────────────
+  bot:
+    build: .
+    restart: always
+    command: python run.py bot --loop
+    environment:
+      DATABASE_URL: postgresql://evr:${POSTGRES_PASSWORD}@db:5432/evr_bot
+      EVR_SECRET_KEY: ${EVR_SECRET_KEY:?EVR_SECRET_KEY tanimli degil!}
+      EVR_FERNET_KEY: ${EVR_FERNET_KEY:?EVR_FERNET_KEY tanimli degil!}
+      ENVIRONMENT: production
+      DATA_DIR: /app/data
+    volumes:
+      - appdata:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Bot günde 2 kez çalışır (UTC 07:25 ve 07:45). İki job arası max ~24 saat.
+      test: ["CMD-SHELL", "find /app/data/bot_heartbeat -mmin -1560 || exit 1"]
+      interval: 300s
+      timeout: 10s
+      retries: 3
+
+  # ─── Günlük Veri Güncelleyici ───────────────────────────────
+  updater:
+    build: .
+    restart: always
+    command: python daily_updater.py --loop
+    environment:
+      DATABASE_URL: postgresql://evr:${POSTGRES_PASSWORD}@db:5432/evr_bot
+      EVR_SECRET_KEY: ${EVR_SECRET_KEY:?EVR_SECRET_KEY tanimli degil!}
+      EVR_FERNET_KEY: ${EVR_FERNET_KEY:?EVR_FERNET_KEY tanimli degil!}
+      KMFG_EMAIL: ${KMFG_EMAIL:-}
+      KMFG_PASSWORD: ${KMFG_PASSWORD:-}
+      CAPSOLVER_KEY: ${CAPSOLVER_KEY:-}
+      ENVIRONMENT: production
+      DATA_DIR: /app/data
+    volumes:
+      - appdata:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Updater günde 1 kez çalışır (UTC 06:30). 26 saatlik pencere.
+      test: ["CMD-SHELL", "find /app/data/updater_heartbeat -mmin -1560 || exit 1"]
+      interval: 300s
+      timeout: 10s
+      retries: 3
+
+  # ─── Cloudflare Tunnel (Ücretsiz Public URL) ────────────────
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  appdata:

@@ -1,0 +1,28 @@
+# ═══════════════════════════════════════════════════════════════
+# EVR Trading Bot — Lokal Geliştirme Yaması (Override)
+# ═══════════════════════════════════════════════════════════════
+# Bu dosya SADECE SADECE sizin bilgisayarınızda docker'ı çalıştırırken
+# otomatik devreye girer. Production (VPS) ayarlarını bozmadan
+# orijinal 600 günlük SQLite veritabanınızı konteyner içine mount eder.
+
+services:
+  web:
+    environment:
+      DATABASE_URL: "sqlite:////app/evr_bot.db"
+    volumes:
+      - ./evr_bot.db:/app/evr_bot.db
+
+  bot:
+    environment:
+      DATABASE_URL: "sqlite:////app/evr_bot.db"
+    volumes:
+      - ./evr_bot.db:/app/evr_bot.db
+
+  updater:
+    environment:
+      DATABASE_URL: "sqlite:////app/evr_bot.db"
+      KMFG_EMAIL: "test@simulation.com"
+      KMFG_PASSWORD: "simulate_pass"
+      CAPSOLVER_KEY: "simulate_key"
+    volumes:
+      - ./evr_bot.db:/app/evr_bot.db

@@ -1,0 +1,44 @@
+# Environment Variables
+.env
+.fernet_key
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Veritabanı ve Loglar (Hassas Veriler)
+*.db
+*.sqlite3
+evr_bot.db
+*.log
+scraper.log
+evr_bot.log
+daily_updater.log
+*.csv
+
+# Kilit Dosyaları
+*.lock
+
+# Sistem Dosyaları
+.DS_Store
+Thumbs.db
