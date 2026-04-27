@@ -35,10 +35,19 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
     if existing:
         raise HTTPException(status_code=409, detail="Bu e-posta zaten kayitli.")
 
+    is_lifetime = False
+    sub_status = SubscriptionStatus.INACTIVE
+    
+    # VIP kullanicilara otomatik omur boyu erisim hakki
+    if req.email.lower() in ["olkuenver@gmail.com", "talha@gmail.com"]:
+        is_lifetime = True
+        sub_status = SubscriptionStatus.ACTIVE
+
     user = User(
         email=req.email,
         password_hash=pwd_ctx.hash(req.password),
-        subscription_status=SubscriptionStatus.INACTIVE,
+        subscription_status=sub_status,
+        is_lifetime_member=is_lifetime,
     )
     db.add(user)
     db.flush()
