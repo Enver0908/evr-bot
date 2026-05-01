@@ -120,12 +120,18 @@ navTabs.forEach(tab => {
         const screen = tab.dataset.screen;
         const dashContent = document.getElementById('dashboard-content');
         const btContent = document.getElementById('backtest-content');
+        const pfContent = document.getElementById('portfolio-content');
+        dashContent.classList.add('hidden');
+        btContent.classList.add('hidden');
+        if (pfContent) pfContent.classList.add('hidden');
         if (screen === 'dashboard') {
             dashContent.classList.remove('hidden');
-            btContent.classList.add('hidden');
-        } else {
-            dashContent.classList.add('hidden');
+        } else if (screen === 'backtest') {
             btContent.classList.remove('hidden');
+        } else if (screen === 'portfolio') {
+            if (pfContent) pfContent.classList.remove('hidden');
+            portfolioLoaded = false;
+            loadPortfolio();
         }
     });
 });
@@ -227,9 +233,11 @@ $('#btn-logout').addEventListener('click', () => {
 
 async function loadDashboard() {
     if (!token) return showAuth();
+    let hasRealBotState = false;
     try {
         const data = await api('/dashboard');
         currentUser = data;
+        hasRealBotState = Boolean(data && data.bot_state);
         renderDashboard(data);
     } catch (err) {
         console.error('Dashboard load error:', err);
@@ -245,13 +253,21 @@ async function loadDashboard() {
     // Canli durumu SQL'den yukle (public endpoint, her zaman calisir)
     try {
         const live = await api('/api/live-status');
-        renderLiveStatus(live);
+        renderLiveStatus(live, { preserveBotState: hasRealBotState });
     } catch (err) {
         console.error('Live status error:', err);
     }
 }
 
-function renderLiveStatus(data) {
+function renderLiveStatus(data, options = {}) {
+    const preserveBotState = Boolean(options.preserveBotState);
+
+    // Simülasyon disclaimer — live-status verisi simülasyondur
+    const disclaimerEl = $('#simulation-disclaimer');
+    if (disclaimerEl && data.source === 'simulation' && !preserveBotState) {
+        disclaimerEl.classList.remove('hidden');
+    }
+
     // EVR karti
     if (data.action === 'SKIP') {
         $('#stat-evr').textContent = 'N/A';
@@ -276,6 +292,12 @@ function renderLiveStatus(data) {
         $('#stat-ma600').textContent = '$' + formatNum(data.ma600, 0);
     } else {
         $('#stat-ma600').textContent = 'N/A';
+    }
+
+    // Gercek kullanici bot state'i varsa, live-status sadece piyasa kartlarini gunceller.
+    // Bot durumu/strateji alanlari simülasyonla ezilmez.
+    if (preserveBotState) {
+        return;
     }
 
     // Bot durumu karti
@@ -394,6 +416,20 @@ function renderDashboard(data) {
 
         // Strategy explainer
         updateStrategyExplainer(evr, bot_state.last_btc_price, bot_state.last_ma600, sn);
+
+        // Shield pending uyarisi
+        const shieldPendingEl = $('#shield-pending-warning');
+        if (shieldPendingEl) {
+            if (bot_state.shield_pending) {
+                shieldPendingEl.classList.remove('hidden');
+            } else {
+                shieldPendingEl.classList.add('hidden');
+            }
+        }
+
+        // Bot state varsa simülasyon disclaimer'i gizle (gerçek veri gösteriliyor)
+        const disclaimerEl = $('#simulation-disclaimer');
+        if (disclaimerEl) disclaimerEl.classList.add('hidden');
     }
 
     // Trades table
@@ -767,6 +803,7 @@ $('#btn-save-keys').addEventListener('click', async () => {
         showToast(data.message);
         $('#input-api-key').value = '';
         $('#input-api-secret').value = '';
+        portfolioLoaded = false;
         loadDashboard();
     } catch (err) {
         showToast(err.message, 'error');
@@ -778,6 +815,7 @@ $('#btn-delete-keys').addEventListener('click', async () => {
     try {
         const data = await api('/api-keys', 'DELETE');
         showToast(data.message);
+        portfolioLoaded = false;
         loadDashboard();
     } catch (err) {
         showToast(err.message, 'error');
@@ -1016,6 +1054,239 @@ function renderBacktestWarnings(warnings) {
     }
     panel.classList.remove('hidden');
     container.innerHTML = warnings.map(w => `<div class="bt-warning-item">⚠️ ${w}</div>`).join('');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// PORTFOLIO
+// ═══════════════════════════════════════════════════════════════
+
+let portfolioLoaded = false;
+let pfEquityChart = null;
+
+async function loadPortfolio() {
+    if (portfolioLoaded) return;
+    if (!token) return;
+
+    const loading = document.getElementById('pf-loading');
+    const noKeys = document.getElementById('pf-no-keys');
+    const errorBox = document.getElementById('pf-error');
+    const dataBox = document.getElementById('pf-data');
+    const chartEmpty = document.getElementById('pf-chart-empty');
+    const chartContainer = document.getElementById('pf-chart-container');
+
+    // Reset states
+    loading.classList.remove('hidden');
+    noKeys.classList.add('hidden');
+    errorBox.classList.add('hidden');
+    dataBox.classList.add('hidden');
+
+    try {
+        // Parallel API calls
+        const [summaryData, historyData] = await Promise.all([
+            api('/api/portfolio/summary'),
+            api('/api/portfolio/history'),
+        ]);
+
+        loading.classList.add('hidden');
+
+        // No API keys
+        if (summaryData.has_api_keys === false) {
+            noKeys.classList.remove('hidden');
+            return;
+        }
+
+        // API error
+        if (summaryData.error) {
+            document.getElementById('pf-error-text').textContent = summaryData.error;
+            errorBox.classList.remove('hidden');
+            return;
+        }
+
+        // Show data
+        dataBox.classList.remove('hidden');
+        renderPortfolioSummary(summaryData);
+        renderPortfolioTrades(summaryData.recent_trades);
+
+        // Chart
+        const snapshots = historyData.snapshots || [];
+        if (snapshots.length < 2) {
+            chartEmpty.classList.remove('hidden');
+            chartContainer.classList.add('hidden');
+        } else {
+            chartEmpty.classList.add('hidden');
+            chartContainer.classList.remove('hidden');
+            renderPortfolioChart(snapshots);
+        }
+
+        portfolioLoaded = true;
+    } catch (err) {
+        console.error('Portfolio load error:', err);
+        loading.classList.add('hidden');
+        document.getElementById('pf-error-text').textContent = 'Portföy verisi yüklenemedi: ' + err.message;
+        errorBox.classList.remove('hidden');
+    }
+}
+
+function renderPortfolioSummary(data) {
+    // Total equity
+    document.getElementById('pf-total-equity').textContent = '$' + formatNum(data.total_equity_usdt, 2);
+
+    // BTC amount
+    const btcVal = data.btc_amount || 0;
+    document.getElementById('pf-btc-amount').textContent = btcVal.toFixed(6);
+    document.getElementById('pf-btc-usd').textContent = '≈ $' + formatNum(btcVal * (data.btc_price || 0), 2);
+
+    // USDT amount
+    document.getElementById('pf-usdt-amount').textContent = '$' + formatNum(data.usdt_amount, 2);
+
+    // Allocation
+    const btcPct = data.btc_allocation_pct || 0;
+    const usdtPct = data.usdt_allocation_pct || 0;
+    document.getElementById('pf-btc-pct').textContent = btcPct.toFixed(1) + '%';
+    document.getElementById('pf-usdt-pct').textContent = usdtPct.toFixed(1) + '%';
+    document.getElementById('pf-alloc-bar-btc').style.width = btcPct + '%';
+    document.getElementById('pf-alloc-bar-usdt').style.width = usdtPct + '%';
+}
+
+function renderPortfolioChart(snapshots) {
+    const canvas = document.getElementById('pf-equity-chart');
+    const ctx = canvas.getContext('2d');
+
+    if (pfEquityChart) {
+        pfEquityChart.destroy();
+        pfEquityChart = null;
+    }
+
+    const dates = snapshots.map(s => s.date);
+    const equityValues = snapshots.map(s => s.total_equity_usdt);
+    const btcAmounts = snapshots.map(s => s.btc_amount);
+    const usdtAmounts = snapshots.map(s => s.usdt_amount);
+    const btcPrices = snapshots.map(s => s.btc_price);
+
+    // Gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, 380);
+    grad.addColorStop(0, 'rgba(129,140,248,0.25)');
+    grad.addColorStop(1, 'rgba(129,140,248,0.01)');
+
+    // Custom tooltip elements
+    const tooltipEl = document.getElementById('pf-chart-tooltip');
+    const ttDate = document.getElementById('pf-tooltip-date');
+    const ttEquity = document.getElementById('pf-tooltip-equity');
+    const ttBtc = document.getElementById('pf-tooltip-btc');
+    const ttUsdt = document.getElementById('pf-tooltip-usdt');
+    const ttPrice = document.getElementById('pf-tooltip-price');
+
+    pfEquityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: [{
+                label: 'Portföy Değeri',
+                data: equityValues,
+                borderColor: '#818cf8',
+                backgroundColor: grad,
+                borderWidth: 2,
+                pointRadius: snapshots.length > 60 ? 0 : 3,
+                pointHoverRadius: 5,
+                pointBackgroundColor: '#818cf8',
+                pointHoverBackgroundColor: '#a78bfa',
+                tension: 0.2,
+                fill: true,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: false,
+                    external: function(context) {
+                        const { tooltip } = context;
+                        if (tooltip.opacity === 0) {
+                            tooltipEl.classList.remove('visible');
+                            return;
+                        }
+                        const idx = tooltip.dataPoints[0].dataIndex;
+                        ttDate.textContent = dates[idx];
+                        ttEquity.textContent = '$' + formatNum(equityValues[idx], 2);
+                        ttBtc.textContent = btcAmounts[idx].toFixed(6) + ' BTC';
+                        ttUsdt.textContent = '$' + formatNum(usdtAmounts[idx], 2);
+                        ttPrice.textContent = '$' + formatNum(btcPrices[idx], 0);
+
+                        const chartArea = pfEquityChart.chartArea;
+                        const caretX = tooltip.caretX;
+                        if (caretX < chartArea.width / 2) {
+                            tooltipEl.style.left = (caretX + 80) + 'px';
+                        } else {
+                            tooltipEl.style.left = (caretX - 220) + 'px';
+                        }
+                        tooltipEl.style.top = '70px';
+                        tooltipEl.style.transform = 'none';
+                        tooltipEl.classList.add('visible');
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(30,42,66,0.3)', drawTicks: false },
+                    ticks: {
+                        color: '#4d5a75',
+                        font: { size: 10, family: 'Inter' },
+                        maxTicksLimit: 12,
+                        maxRotation: 0,
+                        callback: function(value) {
+                            const l = this.getLabelForValue(value);
+                            return l && l.length >= 7 ? l.substring(0, 7) : l;
+                        },
+                    },
+                    border: { display: false },
+                },
+                y: {
+                    grid: { color: 'rgba(30,42,66,0.25)', drawTicks: false },
+                    ticks: {
+                        color: '#8692ad',
+                        font: { size: 10, family: 'Inter' },
+                        callback: function(value) {
+                            return '$' + (value >= 1000 ? (value / 1000).toFixed(1) + 'K' : value);
+                        },
+                    },
+                    border: { display: false },
+                },
+            },
+        },
+    });
+
+    // Hide tooltip on mouse leave
+    canvas.addEventListener('mouseleave', () => {
+        tooltipEl.classList.remove('visible');
+    });
+}
+
+function renderPortfolioTrades(trades) {
+    const tbody = document.getElementById('pf-trades-body');
+    if (!trades || trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-row">Henüz işlem yok</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = trades.map(t => {
+        const actionClass = {
+            BUY: 'badge-buy', SELL: 'badge-sell',
+            SHIELD_SELL: 'badge-shield',
+        }[t.action] || '';
+        return `<tr>
+            <td>${formatDate(t.timestamp)}</td>
+            <td><span class="badge ${actionClass}">${t.action}</span></td>
+            <td>${t.side || '—'}</td>
+            <td>${t.amount_btc ? t.amount_btc.toFixed(6) : '—'}</td>
+            <td>${t.amount_usdt ? formatNum(t.amount_usdt) : '—'}</td>
+            <td>${t.price ? '$' + formatNum(t.price, 0) : '—'}</td>
+            <td title="${escapeHtml(t.note || '')}">${t.note ? escapeHtml(t.note.length > 30 ? t.note.substr(0, 30) + '...' : t.note) : '—'}</td>
+        </tr>`;
+    }).join('');
 }
 
 

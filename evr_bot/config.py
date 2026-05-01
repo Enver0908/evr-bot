@@ -25,6 +25,13 @@ DATABASE_URL = os.getenv(
     f"sqlite:///{_DB_PATH}",
 )
 
+_default_lifetime_members = "olkuenver@gmail.com,talha@gmail.com"
+LIFETIME_MEMBER_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("LIFETIME_MEMBER_EMAILS", _default_lifetime_members).split(",")
+    if email.strip()
+}
+
 # ─── Güvenlik ─────────────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("EVR_SECRET_KEY")
 if not SECRET_KEY:
@@ -56,6 +63,14 @@ SHIELD_CHECK_UTC_HOUR = 7         # UTC 07:25 (Referans Fiyat Güncellemesinden 
 SHIELD_CHECK_UTC_MINUTE = 25       
 EVR_CYCLE_UTC_HOUR = 7            # UTC 07:45 (TSİ 10:45)
 EVR_CYCLE_UTC_MINUTE = 45
+
+# Telafi (Retry) Job Saatleri (Updater 10:30, 14:00, 18:00 UTC çalışır)
+# Bot da updater'dan 15 dk sonra çalışarak gelen veriyi değerlendirir.
+EVR_CYCLE_RETRY_HOURS = [10, 14, 18]
+EVR_CYCLE_RETRY_MINUTES = [45, 15, 15]
+
+SHIELD_CHECK_RETRY_HOURS = [10, 14, 18]
+SHIELD_CHECK_RETRY_MINUTES = [35, 5, 5]
 
 
 

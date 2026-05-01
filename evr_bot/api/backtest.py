@@ -148,6 +148,9 @@ def run_backtest(request: Request, req: BacktestRequest, db: Session = Depends(g
             if dd > max_drawdown:
                 max_drawdown = dd
 
+        # ─── 1. STATE TRANSITIONS (SHIELD CHECK) ───
+        prev_state = state
+
         if state == "NORMAL":
             if ma600 is not None and btc_price < ma600:
                 breakdown_ref = btc_price
@@ -173,47 +176,8 @@ def run_backtest(request: Request, req: BacktestRequest, db: Session = Depends(g
                         })
                         usdt_balance += sell_usdt
                         btc_balance = 0.0
-            else:
-                if is_live and evr is not None:
-                    total = usdt_balance + (btc_balance * btc_price)
-                    if evr <= EVR_BUY_THRESHOLD:
-                        buy_usdt = total * BUY_PERCENT
-                        if buy_usdt > usdt_balance:
-                            buy_usdt = usdt_balance
-                        if buy_usdt >= MIN_ORDER_USDT:
-                            buy_btc = buy_usdt / btc_price
-                            usdt_balance -= buy_usdt
-                            btc_balance += buy_btc
-                            trades.append({
-                                "date": day_str,
-                                "action": "BUY",
-                                "side": "buy",
-                                "price": btc_price,
-                                "amount_btc": round(buy_btc, 8),
-                                "amount_usdt": round(buy_usdt, 2),
-                                "evr": evr,
-                                "state": state,
-                                "note": f"EVR {evr:.1f} <= {EVR_BUY_THRESHOLD}",
-                            })
-                    elif evr >= EVR_SELL_THRESHOLD:
-                        sell_btc = btc_balance * SELL_PERCENT
-                        sell_usdt = sell_btc * btc_price
-                        if sell_usdt >= MIN_ORDER_USDT:
-                            btc_balance -= sell_btc
-                            usdt_balance += sell_usdt
-                            trades.append({
-                                "date": day_str,
-                                "action": "SELL",
-                                "side": "sell",
-                                "price": btc_price,
-                                "amount_btc": round(sell_btc, 8),
-                                "amount_usdt": round(sell_usdt, 2),
-                                "evr": evr,
-                                "state": state,
-                                "note": f"EVR {evr:.1f} >= {EVR_SELL_THRESHOLD}",
-                            })
 
-        elif state == "SHIELD":
+        if state == "SHIELD" and prev_state == "SHIELD":
             drop_threshold = breakdown_ref * (1 - BREAKDOWN_DROP_PERCENT)
             if ma600 is not None and btc_price >= ma600:
                 state = "NORMAL"
@@ -223,38 +187,77 @@ def run_backtest(request: Request, req: BacktestRequest, db: Session = Depends(g
                         "state": state,
                         "reason": f"Fiyat (${btc_price:,.0f}) >= MA600 (${ma600:,.0f}). Kalkan Reset.",
                     })
-                    total = usdt_balance + (btc_balance * btc_price)
-                    if evr is not None and evr <= EVR_BUY_THRESHOLD:
-                        buy_usdt = total * BUY_PERCENT
-                        if buy_usdt > usdt_balance:
-                            buy_usdt = usdt_balance
-                        if buy_usdt >= MIN_ORDER_USDT:
-                            buy_btc = buy_usdt / btc_price
-                            usdt_balance -= buy_usdt
-                            btc_balance += buy_btc
-                            trades.append({
-                                "date": day_str,
-                                "action": "BUY",
-                                "side": "buy",
-                                "price": btc_price,
-                                "amount_btc": round(buy_btc, 8),
-                                "amount_usdt": round(buy_usdt, 2),
-                                "evr": evr,
-                                "state": state,
-                                "note": f"Reset sonrasi alis: EVR {evr:.1f}",
-                            })
-
-            elif evr == 0.0 or btc_price <= drop_threshold:
-                reason = "EVR=0.0" if evr == 0.0 else f"Fiyat (${btc_price:,.0f}) <= %45 dusus"
+            elif btc_price <= drop_threshold:
                 state = "BLIND"
                 if is_live:
                     state_timeline.append({
                         "date": day_str,
                         "state": state,
-                        "reason": f"Dip bolgesi: {reason}. MA600 iptal.",
+                        "reason": f"Dip bolgesi: Fiyat (${btc_price:,.0f}) <= %45 dusus. MA600 iptal.",
+                    })
+
+        if state == "BLIND" and prev_state == "BLIND":
+            if ath > 0 and btc_price >= ath:
+                state = "NORMAL"
+                if is_live:
+                    state_timeline.append({
+                        "date": day_str,
+                        "state": state,
+                        "reason": f"Fiyat (${btc_price:,.0f}) >= Eski ATH (${ath:,.0f}).",
+                    })
+
+        # ─── 2. EVR LOGIC (EVR CYCLE) ───
+        if state == "NORMAL":
+            if is_live and evr is not None:
+                total = usdt_balance + (btc_balance * btc_price)
+                if evr <= EVR_BUY_THRESHOLD:
+                    buy_usdt = total * BUY_PERCENT
+                    if buy_usdt > usdt_balance:
+                        buy_usdt = usdt_balance
+                    if buy_usdt >= MIN_ORDER_USDT:
+                        buy_btc = buy_usdt / btc_price
+                        usdt_balance -= buy_usdt
+                        btc_balance += buy_btc
+                        trades.append({
+                            "date": day_str,
+                            "action": "BUY",
+                            "side": "buy",
+                            "price": btc_price,
+                            "amount_btc": round(buy_btc, 8),
+                            "amount_usdt": round(buy_usdt, 2),
+                            "evr": evr,
+                            "state": state,
+                            "note": f"EVR {evr:.1f} <= {EVR_BUY_THRESHOLD}",
+                        })
+                elif evr >= EVR_SELL_THRESHOLD:
+                    sell_btc = btc_balance * SELL_PERCENT
+                    sell_usdt = sell_btc * btc_price
+                    if sell_usdt >= MIN_ORDER_USDT:
+                        btc_balance -= sell_btc
+                        usdt_balance += sell_usdt
+                        trades.append({
+                            "date": day_str,
+                            "action": "SELL",
+                            "side": "sell",
+                            "price": btc_price,
+                            "amount_btc": round(sell_btc, 8),
+                            "amount_usdt": round(sell_usdt, 2),
+                            "evr": evr,
+                            "state": state,
+                            "note": f"EVR {evr:.1f} >= {EVR_SELL_THRESHOLD}",
+                        })
+
+        elif state == "SHIELD":
+            if evr == 0.0:
+                state = "BLIND"
+                if is_live:
+                    state_timeline.append({
+                        "date": day_str,
+                        "state": state,
+                        "reason": "EVR=0.0 -> Dip bolgesi. MA600 iptal.",
                     })
                     total = usdt_balance + (btc_balance * btc_price)
-                    if evr is not None and evr <= EVR_BUY_THRESHOLD:
+                    if evr <= EVR_BUY_THRESHOLD:
                         buy_usdt = total * BUY_PERCENT
                         if buy_usdt > usdt_balance:
                             buy_usdt = usdt_balance
@@ -275,16 +278,7 @@ def run_backtest(request: Request, req: BacktestRequest, db: Session = Depends(g
                             })
 
         elif state == "BLIND":
-            if ath > 0 and btc_price >= ath:
-                state = "NORMAL"
-                if is_live:
-                    state_timeline.append({
-                        "date": day_str,
-                        "state": state,
-                        "reason": f"Fiyat (${btc_price:,.0f}) >= Eski ATH (${ath:,.0f}).",
-                    })
-
-            if state == "BLIND" and is_live and evr is not None:
+            if is_live and evr is not None:
                 total = usdt_balance + (btc_balance * btc_price)
                 if evr <= EVR_BUY_THRESHOLD:
                     buy_usdt = total * BUY_PERCENT

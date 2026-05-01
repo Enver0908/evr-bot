@@ -364,6 +364,31 @@ body {
     gap: 24px;
 }
 
+/* ─── Alert Banners ────────────────────────────────────────── */
+.alert-banner {
+    padding: 14px 20px;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    font-weight: 500;
+    animation: alert-slide-in 0.4s ease-out;
+}
+.alert-banner strong { font-weight: 700; }
+.alert-info {
+    background: rgba(6,182,212,0.08);
+    border: 1px solid rgba(6,182,212,0.2);
+    color: var(--accent-cyan);
+}
+.alert-danger {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.25);
+    color: var(--accent-red);
+}
+@keyframes alert-slide-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
 
 /* ─── Stat Cards ───────────────────────────────────────────── */
 .cards-row {
@@ -1167,4 +1192,149 @@ body {
     .bt-summary-cards {
         grid-template-columns: 1fr 1fr;
     }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   PORTFOLIO
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Equity card highlight */
+.pf-card-equity {
+    border-color: rgba(129,140,248,0.2);
+}
+.pf-card-equity::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--grad-main);
+    opacity: 1;
+}
+
+/* Allocation card */
+.pf-alloc-values {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    margin-top: 4px;
+}
+.pf-alloc-btc {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--accent-btc);
+}
+.pf-alloc-usdt {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--accent-green);
+}
+
+/* Allocation bar */
+.pf-alloc-bar-container {
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg-deep);
+    gap: 2px;
+}
+.pf-alloc-bar-btc {
+    height: 100%;
+    background: linear-gradient(90deg, #f0b90b, #f0b90baa);
+    border-radius: 4px 0 0 4px;
+    transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pf-alloc-bar-usdt {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #10b981aa);
+    border-radius: 0 4px 4px 0;
+    transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pf-alloc-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+.pf-alloc-legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* Info boxes (empty / error / no-keys) */
+.pf-info-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 32px;
+    background: var(--grad-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card);
+}
+.pf-info-box .pf-info-icon {
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+    opacity: 0.8;
+}
+.pf-info-box h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+.pf-info-box p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: 420px;
+}
+.pf-info-box.pf-error {
+    border-color: rgba(239,68,68,0.2);
+}
+.pf-info-box.pf-error p {
+    color: var(--accent-red);
+}
+
+/* Inline info (inside panel) */
+.pf-info-inline {
+    padding: 28px 24px;
+    border: none;
+    box-shadow: none;
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+}
+
+/* Loading state */
+.pf-state-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 64px 32px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* Portfolio chart container */
+#pf-chart-container {
+    position: relative;
+    height: 380px;
+    width: 100%;
+}
+
+/* Portfolio responsive */
+@media (max-width: 900px) {
+    .pf-cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 680px) {
+    .pf-cards { grid-template-columns: 1fr; }
+    #pf-chart-container { height: 280px; }
 }

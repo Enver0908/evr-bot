@@ -45,6 +45,7 @@ class BotStateResponse(BaseModel):
     last_btc_price: float
     last_ma600: float
     last_run_at: Optional[str] = None
+    shield_pending: bool = False
 
 class TradeLogResponse(BaseModel):
     id: int

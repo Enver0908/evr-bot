@@ -28,13 +28,18 @@ from evr_bot.database import SessionLocal, init_db
 from evr_bot.models import MarketData
 from evr_bot.config import MA_PERIOD
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:
+    curl_requests = None
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # YAPILANDIRMA
 # ═══════════════════════════════════════════════════════════════════════════════
 BASE_DIR = Path(__file__).parent
 LOG_FILE = BASE_DIR / "daily_updater.log"
 
-SELF_HEALING_DAYS = 14
+SELF_HEALING_DAYS = 30
 
 # RotatingFileHandler: max 10MB, 5 yedek dosya
 _rotating_handler = logging.handlers.RotatingFileHandler(
@@ -65,6 +70,45 @@ def _write_heartbeat() -> None:
         logger.warning("Heartbeat yazılamadı: %s", exc)
 
 
+# ─── DB Startup Dayanıklılığı ────────────────────────────────────────────────
+def _wait_for_db(max_retries: int = 10) -> None:
+    """
+    PostgreSQL hazır olana kadar exponential backoff ile bekle.
+    Tüm denemeler başarısız olursa process non-zero çıkar;
+    Docker restart: always ile yeniden başlatılır.
+    """
+    from sqlalchemy import text as sa_text
+    from evr_bot.database import SessionLocal
+
+    for attempt in range(1, max_retries + 1):
+        db = None
+        try:
+            db = SessionLocal()
+            db.execute(sa_text("SELECT 1"))
+            db.close()
+            logger.info("DB bağlantısı başarılı (deneme %d/%d).", attempt, max_retries)
+            return
+        except Exception as e:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            wait = min(5 * (2 ** (attempt - 1)), 60)  # 5s, 10s, 20s, 40s, 60s...
+            logger.warning(
+                "DB henüz hazır değil (deneme %d/%d): %s — %ds bekleniyor...",
+                attempt, max_retries, str(e)[:100], wait,
+            )
+            time.sleep(wait)
+
+    logger.critical(
+        "DB RETRY LİMİTİ AŞILDI (%d deneme). Process sonlandırılıyor. "
+        "Docker restart: always ile yeniden başlatılacak.",
+        max_retries,
+    )
+    sys.exit(1)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # YARDIMCI FONKSİYONLAR
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -74,10 +118,13 @@ def fetch_btc_price_10am() -> float | None:
     Bybit Spot API'den bugünün 07:00 UTC
     saatlik mumunun Open fiyatını çeker.
     """
+    if curl_requests is None:
+        logger.error("curl_cffi yüklü değil, Bybit'e bağlanılamıyor.")
+        return None
+
     try:
-        from curl_cffi import requests
         url = "https://api.bytick.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=24"
-        resp = requests.get(url, impersonate="chrome110", timeout=15)
+        resp = curl_requests.get(url, impersonate="chrome110", timeout=15)
         data = resp.json().get("result", {}).get("list", [])
         if not data:
             logger.error("Bybit kline verisi boş döndü.")
@@ -106,10 +153,12 @@ def fetch_btc_prices_for_dates(date_strs: list[str]) -> dict[str, float]:
     if not date_strs:
         return {}
 
+    if curl_requests is None:
+        logger.error("curl_cffi yüklü değil, tarihsel Bybit verisi çekilemiyor.")
+        return {}
+
     prices = {}
     try:
-        from curl_cffi import requests
-
         sorted_dates = sorted(date_strs)
         oldest = sorted_dates[0]
         
@@ -131,7 +180,7 @@ def fetch_btc_prices_for_dates(date_strs: list[str]) -> dict[str, float]:
                 f"?category=spot&symbol=BTCUSDT&interval=60"
                 f"&start={start_ms}&end={cursor_end_ms}&limit=1000"
             )
-            resp = requests.get(url, impersonate="chrome110", timeout=20)
+            resp = curl_requests.get(url, impersonate="chrome110", timeout=20)
             data = resp.json().get("result", {}).get("list", [])
             
             if not data:
@@ -177,6 +226,7 @@ def update():
     logger.info("=" * 60)
     logger.info("SQL Güncelleme başlıyor... (%s UTC)", datetime.now(timezone.utc).isoformat())
 
+    _wait_for_db()
     init_db()
     db = SessionLocal()
 
@@ -232,7 +282,19 @@ def update():
         if evr_records:
             for rec in evr_records:
                 target_dates.add(rec["date"])
-                
+
+        # EVR Backfill: Mevcut ama EVR'si NULL olan satırları da hedefle (Sadece son 30 gün)
+        # NOT: Tüm geçmişin baştan taranmasını (universal scan) önlemek için stale_cutoff (30 gün) sınırı kesin olarak uygulanır.
+        stale_cutoff = (datetime.now(timezone.utc) - timedelta(days=SELF_HEALING_DAYS)).strftime("%Y-%m-%d")
+        null_evr_rows = db.query(MarketData.date_str).filter(
+            MarketData.evr_raw.is_(None),
+            MarketData.date_str >= stale_cutoff
+        ).all()
+        for row in null_evr_rows:
+            target_dates.add(row[0])
+        if null_evr_rows:
+            logger.info("EVR backfill: %d adet evr_raw=NULL satır hedeflendi.", len(null_evr_rows))
+
         target_dates.add(today_str)
         target_dates_list = sorted(list(target_dates))
 
@@ -298,6 +360,31 @@ def update():
         if needs_commit:
             logger.info("Eksik MA600 değerleri veritabanında hesaplandı.")
 
+        # ─── Görünürlük: Bugünün EVR durumunu raporla ────────────────────
+        today_row = db.query(MarketData).filter(MarketData.date_str == today_str).first()
+        if today_row and today_row.evr_raw is None:
+            logger.warning(
+                "BUGÜN (%s) EVR VERİSİ HÂLÂ PENDING (evr_raw=NULL). "
+                "KMQuant henüz yayınlamamış olabilir. Sonraki backfill koşusunda tekrar denenecek.",
+                today_str,
+            )
+
+        # 24 saatten eski NULL EVR uyarısı
+        # 24 saatten eski NULL EVR uyarısı (Sadece son 30 gün içinde)
+        stale_cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=SELF_HEALING_DAYS)).strftime("%Y-%m-%d")
+        stale_nulls = db.query(MarketData).filter(
+            MarketData.evr_raw.is_(None),
+            MarketData.date_str < stale_cutoff,
+            MarketData.date_str >= thirty_days_ago,
+        ).count()
+        if stale_nulls > 0:
+            logger.critical(
+                "%d adet 24 saatten eski evr_raw=NULL kayıt var! "
+                "KMQuant erişim sorunu olabilir. Manuel kontrol gerekli.",
+                stale_nulls,
+            )
+
         db.commit()
         logger.info("SQL Güncelleme tamamlandı.")
         _write_heartbeat()
@@ -318,7 +405,7 @@ def main():
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        logger.info("APScheduler modu: Her gün UTC 07:15'te (TSİ 10:15) çalışacak.")
+        logger.info("APScheduler modu başlatılıyor...")
         _write_heartbeat()  # İlk açılışta Docker healthcheck'in unhealthy kalmaması için
 
         # İlk açılışta hemen bir kez güncelle
@@ -328,6 +415,8 @@ def main():
             logger.exception("İlk güncelleme hatası")
 
         scheduler = BlockingScheduler(timezone="UTC")
+
+        # Ana koşu: Her gün UTC 07:15 (TSİ 10:15)
         scheduler.add_job(
             update,
             CronTrigger(hour=7, minute=15),
@@ -335,6 +424,28 @@ def main():
             id="daily_update",
             name="Günlük EVR+BTC Veri Güncellemesi",
         )
+
+        # Telafi koşuları: Aynı gün içinde EVR backfill için ek saatler
+        # update() zaten idempotent — var olan satırı günceller, duplicate oluşturmaz
+        for job_id, hour, minute in [
+            ("backfill_1", 10, 30),   # UTC 10:30 (TSİ 13:30)
+            ("backfill_2", 14, 0),    # UTC 14:00 (TSİ 17:00)
+            ("backfill_3", 18, 0),    # UTC 18:00 (TSİ 21:00)
+        ]:
+            scheduler.add_job(
+                update,
+                CronTrigger(hour=hour, minute=minute),
+                misfire_grace_time=3600,
+                id=job_id,
+                name=f"EVR Backfill Telafi ({hour:02d}:{minute:02d} UTC)",
+            )
+
+        logger.info("Zamanlayıcı programı:")
+        logger.info("  Ana koşu:    UTC 07:15 (TSİ 10:15)")
+        logger.info("  Telafi #1:   UTC 10:30 (TSİ 13:30)")
+        logger.info("  Telafi #2:   UTC 14:00 (TSİ 17:00)")
+        logger.info("  Telafi #3:   UTC 18:00 (TSİ 21:00)")
+
         try:
             scheduler.start()
         except (KeyboardInterrupt, SystemExit):

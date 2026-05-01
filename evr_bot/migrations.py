@@ -144,6 +144,100 @@ def _migration_006_add_lifetime_membership(connection) -> None:
         )
     )
 
+def _migration_007_create_portfolio_snapshots(connection) -> None:
+    """portfolio_snapshots tablosu ve unique constraint'i garanti et."""
+    # create_all() zaten tabloyu olusturur; burada sadece
+    # unique index'in varligini garanti altina aliyoruz.
+    _create_index_if_missing(
+        connection,
+        "portfolio_snapshots",
+        "uq_portfolio_user_date",
+        "user_id, snapshot_date",
+        unique=True,
+    )
+
+
+def _migration_008_backfill_lifetime_members(connection) -> None:
+    # Sadece is_lifetime_member'ı güncelle; subscription_status'a dokunma
+    # PostgreSQL CHECK constraint (subscription_status_enum) uyumsuzluğunu önler
+    connection.execute(
+        text(
+            """
+            UPDATE users
+            SET is_lifetime_member = TRUE
+            WHERE lower(email) IN ('olkuenver@gmail.com', 'talha@gmail.com')
+              AND is_lifetime_member IS NOT TRUE
+            """
+        )
+    )
+
+
+def _migration_009_add_shield_pending(connection) -> None:
+    """bot_states tablosuna shield_pending alanini ekle."""
+    if _column_exists(connection, "bot_states", "shield_pending"):
+        return
+
+    connection.execute(
+        text(
+            """
+            ALTER TABLE bot_states
+            ADD COLUMN shield_pending BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+
+
+def _migration_010_backfill_lifetime_members_from_env(connection) -> None:
+    """Config'deki omur boyu uyeleri mevcut kullanicilar icin backfill et."""
+    from evr_bot.config import LIFETIME_MEMBER_EMAILS
+
+    emails = sorted({email.strip().lower() for email in LIFETIME_MEMBER_EMAILS if email.strip()})
+    if not emails:
+        return
+
+    placeholders = ", ".join(f":email_{idx}" for idx in range(len(emails)))
+    params = {f"email_{idx}": email for idx, email in enumerate(emails)}
+    connection.execute(
+        text(
+            f"""
+            UPDATE users
+            SET is_lifetime_member = TRUE
+            WHERE lower(email) IN ({placeholders})
+              AND is_lifetime_member IS NOT TRUE
+            """
+        ),
+        params,
+    )
+
+
+def _migration_011_trade_log_query_indexes(connection) -> None:
+    """Dashboard, portfolio ve recovery sorgulari icin composite index'ler."""
+    _create_index_if_missing(
+        connection,
+        "trade_logs",
+        "ix_trade_logs_user_execution_status_timestamp",
+        "user_id, execution_status, timestamp",
+    )
+    _create_index_if_missing(
+        connection,
+        "trade_logs",
+        "ix_trade_logs_user_timestamp",
+        "user_id, timestamp",
+    )
+
+
+def _migration_012_users_email_lower_index(connection) -> None:
+    """lower(email) filtrelerini hizlandiran fonksiyonel index."""
+    connection.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_users_email_lower
+            ON users (lower(email))
+            """
+        )
+    )
+
+
 MIGRATIONS = [
     Migration(
         version=1,
@@ -174,6 +268,36 @@ MIGRATIONS = [
         version=6,
         name="add_lifetime_membership",
         apply=_migration_006_add_lifetime_membership,
+    ),
+    Migration(
+        version=7,
+        name="create_portfolio_snapshots",
+        apply=_migration_007_create_portfolio_snapshots,
+    ),
+    Migration(
+        version=8,
+        name="backfill_lifetime_members",
+        apply=_migration_008_backfill_lifetime_members,
+    ),
+    Migration(
+        version=9,
+        name="add_shield_pending",
+        apply=_migration_009_add_shield_pending,
+    ),
+    Migration(
+        version=10,
+        name="backfill_lifetime_members_from_env",
+        apply=_migration_010_backfill_lifetime_members_from_env,
+    ),
+    Migration(
+        version=11,
+        name="trade_log_query_indexes",
+        apply=_migration_011_trade_log_query_indexes,
+    ),
+    Migration(
+        version=12,
+        name="users_email_lower_index",
+        apply=_migration_012_users_email_lower_index,
     ),
 ]
 

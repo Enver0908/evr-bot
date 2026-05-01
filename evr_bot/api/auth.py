@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import bcrypt
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,7 @@ from evr_bot.database import get_db
 from evr_bot.models import User, UserBotState, SubscriptionStatus, BotStateEnum
 from evr_bot.api.schemas import RegisterRequest, LoginRequest, TokenResponse, MessageResponse
 from evr_bot.api.deps import create_token, get_current_user
+from evr_bot.config import LIFETIME_MEMBER_EMAILS
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -27,28 +29,40 @@ class PwdCtx:
 
 pwd_ctx = PwdCtx()
 
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def sync_lifetime_membership(user: User) -> bool:
+    if normalize_email(user.email) not in LIFETIME_MEMBER_EMAILS:
+        return False
+
+    changed = False
+    if not user.is_lifetime_member:
+        user.is_lifetime_member = True
+        changed = True
+    if user.subscription_status != SubscriptionStatus.ACTIVE:
+        user.subscription_status = SubscriptionStatus.ACTIVE
+        changed = True
+    return changed
+
 @router.post("/register", response_model=TokenResponse, status_code=201)
 @limiter.limit("5/minute")
 def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
     """Yeni kullanici kaydi."""
-    existing = db.query(User).filter(User.email == req.email).first()
+    normalized_email = normalize_email(req.email)
+    existing = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if existing:
         raise HTTPException(status_code=409, detail="Bu e-posta zaten kayitli.")
 
-    is_lifetime = False
-    sub_status = SubscriptionStatus.INACTIVE
-    
-    # VIP kullanicilara otomatik omur boyu erisim hakki
-    if req.email.lower() in ["olkuenver@gmail.com", "talha@gmail.com"]:
-        is_lifetime = True
-        sub_status = SubscriptionStatus.ACTIVE
-
     user = User(
-        email=req.email,
+        email=normalized_email,
         password_hash=pwd_ctx.hash(req.password),
-        subscription_status=sub_status,
-        is_lifetime_member=is_lifetime,
+        subscription_status=SubscriptionStatus.INACTIVE,
+        is_lifetime_member=False,
     )
+    sync_lifetime_membership(user)
     db.add(user)
     db.flush()
 
@@ -70,9 +84,14 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
 @limiter.limit("5/minute")
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     """Kullanici girisi."""
-    user = db.query(User).filter(User.email == req.email).first()
+    normalized_email = normalize_email(req.email)
+    user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if not user or not pwd_ctx.verify(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Gecersiz e-posta veya sifre.")
+
+    if sync_lifetime_membership(user):
+        db.commit()
+        db.refresh(user)
 
     token = create_token(user.id, user.email)
     return TokenResponse(access_token=token, email=user.email)
@@ -82,18 +101,32 @@ def activate_subscription(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Aboneligi aktif et (demo: aninda aktif, uretimde odeme entegrasyonu eklenecek)."""
+    """
+    Aboneligi aktif et.
+    NOT: Su an ucretsiz 30 gunluk trial olarak calisir.
+    Odeme entegrasyonu eklendiginde bu endpoint guvenli hale getirilecektir.
+    """
+    import logging
+    _logger = logging.getLogger("evr_bot.api.auth")
+
     if user.is_lifetime_member:
         return MessageResponse(message="Bu hesap omur boyu uyelikte; ek aktivasyon gerekmiyor.")
 
-    import os
-    if os.getenv("ENVIRONMENT", "production") == "production":
-        raise HTTPException(status_code=403, detail="Abonelik endpoint'i uretim asamasinda devre disidir.")
+    if user.subscription_status == SubscriptionStatus.ACTIVE:
+        return MessageResponse(message="Aboneliginiz zaten aktif.")
 
     user.subscription_status = SubscriptionStatus.ACTIVE
     user.subscription_expires = (datetime.now(timezone.utc) + timedelta(days=30)).replace(tzinfo=None)
     db.commit()
-    return MessageResponse(message="Abonelik 30 gun sureyle aktif edildi.")
+
+    _logger.info(
+        "SUBSCRIPTION_ACTIVATED: user=%s, trial=30d, expires=%s",
+        user.email, user.subscription_expires,
+    )
+    return MessageResponse(
+        message="Ucretsiz 30 gunluk deneme aboneligi aktif edildi. "
+                "Bot islem yapabilmesi icin Bybit API anahtarlarinizi tanimlayiniz."
+    )
 
 
 @router.post("/subscription/deactivate", response_model=MessageResponse)

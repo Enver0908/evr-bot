@@ -106,7 +106,7 @@ services:
     restart: always
     command: tunnel run
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Cloudflare tunnel token tanimli degil!}
     depends_on:
       - web
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from evr_bot.database import get_db
-from evr_bot.models import User, TradeLog
+from evr_bot.models import User, TradeLog, ExecutionStatus
 from evr_bot.api.schemas import DashboardResponse, UserProfile, BotStateResponse, TradeLogResponse
 from evr_bot.api.deps import get_current_user
 from evr_bot.api.auth import limiter
@@ -45,11 +45,13 @@ def get_dashboard(
             last_btc_price=bs.last_btc_price or 0.0,
             last_ma600=bs.last_ma600 or 0.0,
             last_run_at=bs.last_run_at.isoformat() if bs.last_run_at else None,
+            shield_pending=bool(bs.shield_pending) if hasattr(bs, 'shield_pending') else False,
         )
 
     trades = (
         db.query(TradeLog)
         .filter(TradeLog.user_id == user.id)
+        .filter(TradeLog.execution_status == ExecutionStatus.FILLED)
         .order_by(TradeLog.timestamp.desc())
         .limit(50)
         .all()
@@ -258,6 +260,8 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
         "action_label": action_label,
         "action_text": action_text,
         "total_days": len(hist_dates),
+        "source": "simulation",
+        "disclaimer": "Bu veriler tarihsel simülasyona dayalidir. Gercek bot durumu Dashboard'dan goruntulenebilir.",
     }
 
     _live_status_cache["data"] = result

@@ -30,8 +30,11 @@ def create_exchange(api_key: str, api_secret: str) -> ccxt.bybit:
         "enableRateLimit": True,
         "options": {
             "defaultType": "spot",
+            "adjustForTimeDifference": True,
         },
     })
+    if BYBIT_TESTNET:
+        exchange.set_sandbox_mode(True)
     return exchange
 
 
@@ -39,6 +42,8 @@ def get_btc_price(exchange: Optional[ccxt.bybit] = None) -> float:
     """Güncel BTC/USDT fiyatını çek (anlık ticker)."""
     if exchange is None:
         exchange = ccxt.bybit({"sandbox": BYBIT_TESTNET})
+        if BYBIT_TESTNET:
+            exchange.set_sandbox_mode(True)
     ticker = exchange.fetch_ticker(SYMBOL)
     price = float(ticker["last"])
     logger.info("BTC/USDT fiyat: %.2f", price)

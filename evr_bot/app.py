@@ -20,7 +20,7 @@ from slowapi.errors import RateLimitExceeded
 
 from evr_bot.config import BASE_DIR
 from evr_bot.database import init_db
-from evr_bot.api import auth, dashboard, keys, backtest
+from evr_bot.api import auth, dashboard, keys, backtest, portfolio
 
 STATIC_DIR = BASE_DIR / "static"
 logger = logging.getLogger("evr_bot.api")
@@ -58,6 +58,7 @@ app.include_router(auth.router, tags=["Authentication"])
 app.include_router(keys.router, tags=["API Keys"])
 app.include_router(dashboard.router, tags=["Dashboard & Data"])
 app.include_router(backtest.router, tags=["Backtesting"])
+app.include_router(portfolio.router, tags=["Portfolio"])
 
 # Rate Limiter (slowapi) — auth rate limiter'i uygulamaya kaydet
 app.state.limiter = auth.limiter
@@ -75,4 +76,47 @@ def serve_index():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    """
+    Deep health check:
+    - DB baglantisi
+    - Bot/Updater heartbeat dosya yasini kontrol eder
+    """
+    from sqlalchemy import text as sa_text
+    from evr_bot.database import SessionLocal
+    from pathlib import Path
+
+    status = "ok"
+    details = {}
+
+    # 1. DB baglantisi
+    try:
+        db = SessionLocal()
+        db.execute(sa_text("SELECT 1"))
+        db.close()
+        details["database"] = "connected"
+    except Exception as e:
+        details["database"] = f"error: {str(e)[:80]}"
+        status = "degraded"
+
+    # 2. Heartbeat dosyalari
+    data_dir = Path(os.getenv("DATA_DIR", "."))
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    for name in ["bot_heartbeat", "updater_heartbeat"]:
+        hb_path = data_dir / name
+        if hb_path.exists():
+            age_minutes = (now_ts - hb_path.stat().st_mtime) / 60
+            if age_minutes > 1560:  # 26 saat
+                details[name] = f"stale ({age_minutes:.0f} min)"
+                status = "degraded"
+            else:
+                details[name] = f"fresh ({age_minutes:.0f} min ago)"
+        else:
+            details[name] = "missing"
+            status = "degraded"
+
+    return {
+        "status": status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "details": details,
+    }

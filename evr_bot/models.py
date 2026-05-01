@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Boolean,
-    Enum as SAEnum, ForeignKey, Text,
+    Enum as SAEnum, ForeignKey, Text, UniqueConstraint, Index, func,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -57,6 +57,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
+    __table_args__ = (
+        Index("ix_users_email_lower", func.lower(email)),
+    )
 
     # Abonelik
     subscription_status = Column(
@@ -83,6 +86,10 @@ class User(Base):
     )
     trade_logs = relationship(
         "TradeLog", back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    portfolio_snapshots = relationship(
+        "PortfolioSnapshot", back_populates="user",
         cascade="all, delete-orphan",
     )
 
@@ -118,6 +125,9 @@ class UserBotState(Base):
     last_btc_price = Column(Float, default=0.0)
     last_ma600 = Column(Float, default=0.0)
     last_run_at = Column(DateTime, nullable=True)
+
+    # Shield koruma durumu — satış başarısız olduğunda True yapılır
+    shield_pending = Column(Boolean, default=False, nullable=False)
 
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -167,6 +177,16 @@ class TradeLog(Base):
     # Not
     note = Column(Text, nullable=True)
 
+    __table_args__ = (
+        Index(
+            "ix_trade_logs_user_execution_status_timestamp",
+            "user_id",
+            "execution_status",
+            "timestamp",
+        ),
+        Index("ix_trade_logs_user_timestamp", "user_id", "timestamp"),
+    )
+
     # İlişki
     user = relationship("User", back_populates="trade_logs")
 
@@ -194,3 +214,35 @@ class MarketData(Base):
 
     def __repr__(self):
         return f"<MarketData {self.date_str} BTC: {self.btc_price} EVR: {self.evr_raw}>"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PORTFÖY SNAPSHOT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PortfolioSnapshot(Base):
+    """Günlük portföy bakiye snapshot'ı. Aynı kullanıcı için aynı gün yalnızca 1 satır."""
+    __tablename__ = "portfolio_snapshots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "snapshot_date", name="uq_portfolio_user_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # Günlük bucket — duplicate önleme anchor'u (YYYY-MM-DD string)
+    snapshot_date = Column(String(10), nullable=False, index=True)
+
+    # Detaylı zaman damgası (snapshot'ın tam saati)
+    snapshot_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    btc_amount = Column(Float, nullable=False, default=0.0)
+    usdt_amount = Column(Float, nullable=False, default=0.0)
+    total_equity_usdt = Column(Float, nullable=False, default=0.0)
+    btc_price = Column(Float, nullable=False, default=0.0)
+
+    # İlişki
+    user = relationship("User", back_populates="portfolio_snapshots")
+
+    def __repr__(self):
+        return f"<PortfolioSnapshot user={self.user_id} date={self.snapshot_date} equity={self.total_equity_usdt}>"

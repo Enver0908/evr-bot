@@ -38,6 +38,7 @@ from evr_bot.market_data import (
 from evr_bot.models import (
     BotStateEnum,
     ExecutionStatus,
+    PortfolioSnapshot,
     TradeAction,
     TradeLog,
     User,
@@ -104,6 +105,71 @@ class TradingEngine:
     @staticmethod
     def _total_kasa(usdt_balance: float, btc_balance: float, btc_price: float) -> float:
         return usdt_balance + (btc_balance * btc_price)
+
+    def _take_snapshot(self) -> None:
+        """
+        Basarili cycle sonrasi portfolio snapshot'i al.
+
+        ONEMLI: Bu metod kendi icinde get_balance() ve get_btc_price()
+        cagirarak GUNCEL bakiyeyi Bybit'ten taze ceker. Asla stale/pre-trade
+        balance objesi kullanilmaz.
+        """
+        try:
+            fresh_balances = get_balance(self.exchange)
+            fresh_btc_price = get_btc_price(self.exchange)
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            total = self._total_kasa(
+                fresh_balances["usdt"], fresh_balances["btc"], fresh_btc_price
+            )
+
+            # Idempotent upsert — ayni gun tekrar snapshot alinirsa guncellenir
+            existing = (
+                self.db.query(PortfolioSnapshot)
+                .filter(
+                    PortfolioSnapshot.user_id == self.user.id,
+                    PortfolioSnapshot.snapshot_date == today_str,
+                )
+                .first()
+            )
+
+            if existing:
+                existing.btc_amount = fresh_balances["btc"]
+                existing.usdt_amount = fresh_balances["usdt"]
+                existing.total_equity_usdt = total
+                existing.btc_price = fresh_btc_price
+                existing.snapshot_at = datetime.now(timezone.utc)
+            else:
+                from sqlalchemy.exc import IntegrityError
+                snap = PortfolioSnapshot(
+                    user_id=self.user.id,
+                    snapshot_date=today_str,
+                    btc_amount=fresh_balances["btc"],
+                    usdt_amount=fresh_balances["usdt"],
+                    total_equity_usdt=total,
+                    btc_price=fresh_btc_price,
+                )
+                try:
+                    with self.db.begin_nested():
+                        self.db.add(snap)
+                        self.db.flush()
+                except IntegrityError:
+                    existing = (
+                        self.db.query(PortfolioSnapshot)
+                        .filter(
+                            PortfolioSnapshot.user_id == self.user.id,
+                            PortfolioSnapshot.snapshot_date == today_str,
+                        )
+                        .first()
+                    )
+                    if existing:
+                        existing.btc_amount = fresh_balances["btc"]
+                        existing.usdt_amount = fresh_balances["usdt"]
+                        existing.total_equity_usdt = total
+                        existing.btc_price = fresh_btc_price
+                        existing.snapshot_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            # Snapshot hatasi asla trading akisini durdurmamalı
+            logger.warning("Portfolio snapshot alinamadi: %s", exc)
 
     def _change_state(self, new_state: BotStateEnum, note: str) -> None:
         old_state = self.state_obj.current_state
@@ -549,6 +615,11 @@ class TradingEngine:
                     self.state_obj.eski_zirve_fiyati = btc_price
                     logger.info("Yeni ATH: %.2f", btc_price)
 
+                # Shield pending retry: önceki shield satışı başarısız olduysa tekrar dene
+                if self.state_obj.shield_pending and btc_price >= ma600:
+                    logger.info("shield_pending aktifti ama fiyat MA600 ustune cikti. Pending temizlendi.")
+                    self.state_obj.shield_pending = False
+
                 if btc_price < ma600:
                     self.state_obj.breakdown_reference_price = btc_price
                     if balances["btc"] * btc_price >= MIN_ORDER_USDT:
@@ -560,20 +631,25 @@ class TradingEngine:
                             is_shield=True,
                         )
                         if not sell_ok:
-                            logger.critical("SHIELD SATISI BASARISIZ - state degistirilmedi.")
+                            logger.critical("SHIELD SATISI BASARISIZ - state NORMAL kaldi, shield_pending=True.")
+                            self.state_obj.shield_pending = True
                             self._log_trade(
                                 TradeAction.STATE_CHANGE,
-                                note="SHIELD satisi basarisiz, state NORMAL kaldi.",
+                                note="SHIELD satisi basarisiz. Koruma BEKLEMEDE. Sonraki cycle'da tekrar denenecek.",
                                 execution_status=ExecutionStatus.FAILED,
                             )
+                        else:
+                            self.state_obj.shield_pending = False
                     else:
                         logger.info("Shield: BTC bakiyesi yok veya minimum altinda.")
+                        self.state_obj.shield_pending = False
                         self._change_state(
                             BotStateEnum.SHIELD,
                             f"Fiyat ({btc_price:.2f}) < MA600 ({ma600:.2f}) (Bakiye Yok)",
                         )
 
             elif state == BotStateEnum.SHIELD:
+                self.state_obj.shield_pending = False  # SHIELD'dayken pending temizlenir
                 breakdown_ref = self.state_obj.breakdown_reference_price or 0.0
                 drop_threshold = breakdown_ref * (1 - BREAKDOWN_DROP_PERCENT)
 
@@ -596,11 +672,20 @@ class TradingEngine:
                         f"Fiyat ({btc_price:.2f}) >= ATH ({ath:.2f}) -> Kalkan yeniden kuruldu",
                     )
 
+            self._take_snapshot()
             self.db.commit()
             result["success"] = True
             result["state"] = self.state_obj.current_state.name
             result["btc_price"] = btc_price
             result["ma600"] = ma600
+        except ccxt.BaseError as exc:
+            logger.error(
+                "SHIELD BORSA API HATASI - Borsa baglantisi veya yetki sorunu. User=%s, Hata=%s",
+                self.user.email,
+                exc,
+            )
+            self.db.rollback()
+            result["error"] = f"Borsa Hatasi: {str(exc)}"
         except Exception as exc:
             logger.critical(
                 "SHIELD DB COMMIT HATASI - Manuel kontrol gerekli. User=%s, Hata=%s",
@@ -630,6 +715,26 @@ class TradingEngine:
                 result["warning"] = "Pending trade recovery tamamlanmadi; yeni EVR cycle atlandi."
                 return result
 
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            # Mükerrer İşlem Koruması (Same-Day Guard)
+            # Bugün içinde başarılı bir EVR işlemi (BUY veya SELL) yapılmışsa tekrar etme.
+            # STATE_CHANGE veya SHIELD_SELL gibi kalkan işlemleri EVR döngüsünü engellememelidir.
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            executed_today = self.db.query(TradeLog).filter(
+                TradeLog.user_id == self.user.id,
+                TradeLog.timestamp >= today_start,
+                TradeLog.execution_status == ExecutionStatus.FILLED,
+                TradeLog.action.in_([TradeAction.BUY, TradeAction.SELL])
+            ).count()
+
+            if executed_today > 0:
+                logger.info("SAME-DAY GUARD: Kullanıcı için bugün (%s) zaten başarılı işlem yapılmış. Bot atlıyor.", today_str)
+                result["success"] = True
+                result["action"] = "SKIP"
+                result["warning"] = "Today's action already executed"
+                return result
+
             evr, evr_date = get_evr_index(self.db)
             if evr < 0:
                 result["error"] = "EVR verisi alinamadi"
@@ -637,7 +742,6 @@ class TradingEngine:
                 return result
 
             last_db_date = get_last_db_date(self.db)
-            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
             if last_db_date != today_str:
                 logger.warning(
@@ -691,12 +795,21 @@ class TradingEngine:
                 logger.info("Blind mod aktif. EVR kurallari uygulaniyor.")
                 self._apply_evr_rules(evr, btc_price, balances)
 
+            self._take_snapshot()
             self.db.commit()
             result["success"] = True
             result["state"] = self.state_obj.current_state.name
             result["evr"] = evr
             result["btc_price"] = btc_price
             result["action"] = "EXECUTED"
+        except ccxt.BaseError as exc:
+            logger.error(
+                "EVR CYCLE BORSA API HATASI - Borsa baglantisi veya yetki sorunu. User=%s, Hata=%s",
+                self.user.email,
+                exc,
+            )
+            self.db.rollback()
+            result["error"] = f"Borsa Hatasi: {str(exc)}"
         except Exception as exc:
             logger.critical(
                 "EVR DB COMMIT HATASI - Manuel kontrol gerekli. User=%s, Hata=%s",

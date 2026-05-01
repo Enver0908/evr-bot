@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from evr_bot.database import get_db
@@ -16,10 +16,56 @@ def save_api_keys(
     db: Session = Depends(get_db),
 ):
     """Bybit API anahtarlarini sifreli olarak kaydet."""
+    import logging
+    _logger = logging.getLogger("evr_bot.api.keys")
+
+    from evr_bot.market_data import create_exchange
+    try:
+        exc = create_exchange(req.api_key, req.api_secret)
+        exc.fetch_balance()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"API Anahtari gecersiz veya erisim reddedildi: {str(e)[:100]}")
+
+    # ── Trade permission metadata kontrolü ──
+    trade_permission_verified = False
+    trade_permission_warning = ""
+    try:
+        # Bybit v5 key info endpoint — hangi yetkilerin aktif olduğunu döner
+        key_info = exc.private_get_user_query_api()
+        permissions = (key_info.get("result") or {}).get("permissions", {})
+        spot_perms = permissions.get("Spot", [])
+        if "SpotTrade" in spot_perms:
+            trade_permission_verified = True
+        else:
+            trade_permission_warning = (
+                " UYARI: Bu API anahtarinda Spot Trade izni tespit edilemedi. "
+                "Bybit'te key olusturulurken 'Spot Trade' yetkisini aktif ettiginizden emin olun, "
+                "aksi halde bot islem yapamaz."
+            )
+            _logger.warning(
+                "User %s: API key kaydedildi ama SpotTrade izni bulunamadi. Permissions: %s",
+                user.email, permissions,
+            )
+    except Exception as perm_exc:
+        # Permission sorgusu başarısız olursa key'i yine kaydet ama uyar
+        trade_permission_warning = (
+            " Trade izni dogrulanamadi (Bybit API yanit vermedi). "
+            "Trade yetkisi ilk bot isleminde dogrulanacaktir."
+        )
+        _logger.warning(
+            "User %s: Trade permission kontrolu basarisiz: %s", user.email, perm_exc,
+        )
+
     user.api_key_encrypted = encrypt(req.api_key)
     user.api_secret_encrypted = encrypt(req.api_secret)
     db.commit()
-    return MessageResponse(message="API anahtarlari sifreli olarak kaydedildi.")
+
+    if trade_permission_verified:
+        msg = "API anahtarlari dogrulandi (bakiye okuma + trade izni) ve kaydedildi."
+    else:
+        msg = f"API anahtarlari kaydedildi (bakiye okuma dogrulandi).{trade_permission_warning}"
+
+    return MessageResponse(message=msg)
 
 
 @router.delete("/api-keys", response_model=MessageResponse)

@@ -105,6 +105,7 @@
                 <div class="nav-tabs">
                     <button class="nav-tab active" data-screen="dashboard" id="nav-tab-dashboard">Dashboard</button>
                     <button class="nav-tab" data-screen="backtest" id="nav-tab-backtest">Backtest</button>
+                    <button class="nav-tab" data-screen="portfolio" id="nav-tab-portfolio">Portföy</button>
                 </div>
             </div>
             <div class="nav-right">
@@ -116,6 +117,14 @@
 
         <!-- ═══════════ DASHBOARD CONTENT ═══════════ -->
         <main class="dashboard-main" id="dashboard-content">
+            <!-- Uyari Panelleri -->
+            <div id="simulation-disclaimer" class="alert-banner alert-info hidden">
+                ⚠ Asagidaki piyasa verileri tarihsel simulasyona dayalidir. Gercek bot durumu icin Dashboard'daki bot state bilgilerine bakiniz.
+            </div>
+            <div id="shield-pending-warning" class="alert-banner alert-danger hidden">
+                🛡️ <strong>Kalkan Satisi Beklemede!</strong> — Onceki MA600 kiriliminda BTC satisi basarisiz oldu. Bot sonraki cycle'da tekrar deneyecek. Bybit hesabinizi ve API anahtarinizi kontrol edin.
+            </div>
+
             <section class="cards-row" id="status-cards">
                 <div class="stat-card evr-card" id="card-evr">
                     <div class="stat-icon">📊</div>
@@ -281,6 +290,99 @@
             </div>
         </main>
 
+        <!-- ═══════════ PORTFOLIO CONTENT ═══════════ -->
+        <main class="dashboard-main hidden" id="portfolio-content">
+            <!-- Loading State -->
+            <div id="pf-loading" class="pf-state-box">
+                <div class="spinner"></div>
+                <span>Portföy verileri yükleniyor...</span>
+            </div>
+
+            <!-- Error State -->
+            <div id="pf-error" class="pf-info-box pf-error hidden">
+                <div class="pf-info-icon">⚠️</div>
+                <p id="pf-error-text">Bir hata oluştu.</p>
+            </div>
+
+            <!-- No API Keys State -->
+            <div id="pf-no-keys" class="pf-info-box hidden">
+                <div class="pf-info-icon">🔑</div>
+                <h3>API Anahtarı Gerekli</h3>
+                <p>Portföy verilerinizi görüntülemek için Bybit API anahtarlarınızı <strong>Dashboard &gt; Ayarlar</strong> bölümünden tanımlayın.</p>
+            </div>
+
+            <!-- Portfolio Data (hidden until loaded) -->
+            <div id="pf-data" class="hidden">
+                <!-- Summary Cards -->
+                <section class="cards-row pf-cards" id="pf-summary-cards">
+                    <div class="stat-card pf-card-equity" id="pf-card-equity">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-label">Toplam Kasa</div>
+                        <div class="stat-value" id="pf-total-equity">—</div>
+                        <div class="stat-sub">USDT karşılığı</div>
+                    </div>
+                    <div class="stat-card" id="pf-card-btc">
+                        <div class="stat-icon">₿</div>
+                        <div class="stat-label">BTC Miktarı</div>
+                        <div class="stat-value" id="pf-btc-amount">—</div>
+                        <div class="stat-sub" id="pf-btc-usd">—</div>
+                    </div>
+                    <div class="stat-card" id="pf-card-usdt">
+                        <div class="stat-icon">💵</div>
+                        <div class="stat-label">USDT Miktarı</div>
+                        <div class="stat-value" id="pf-usdt-amount">—</div>
+                        <div class="stat-sub">Serbest nakit</div>
+                    </div>
+                    <div class="stat-card" id="pf-card-alloc">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-label">BTC / USDT Dağılımı</div>
+                        <div class="pf-alloc-values">
+                            <span id="pf-btc-pct" class="pf-alloc-btc">—%</span>
+                            <span id="pf-usdt-pct" class="pf-alloc-usdt">—%</span>
+                        </div>
+                        <div class="pf-alloc-bar-container">
+                            <div class="pf-alloc-bar-btc" id="pf-alloc-bar-btc" style="width:0%"></div>
+                            <div class="pf-alloc-bar-usdt" id="pf-alloc-bar-usdt" style="width:0%"></div>
+                        </div>
+                        <div class="pf-alloc-legend">
+                            <span><span class="legend-color" style="background:#f0b90b"></span>BTC</span>
+                            <span><span class="legend-color" style="background:#10b981"></span>USDT</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Portfolio Equity Chart -->
+                <section class="panel" id="pf-chart-panel">
+                    <h2 class="panel-title"><span class="title-glow">Portföy Değeri Grafiği</span></h2>
+                    <div id="pf-chart-empty" class="pf-info-box pf-info-inline hidden">
+                        <div class="pf-info-icon">📈</div>
+                        <p>Portföy geçmişi henüz yeterli değil. Veriler günlük olarak biriktirilecektir.</p>
+                    </div>
+                    <div class="chart-container" id="pf-chart-container">
+                        <canvas id="pf-equity-chart"></canvas>
+                    </div>
+                    <div class="chart-tooltip" id="pf-chart-tooltip">
+                        <div class="tooltip-date" id="pf-tooltip-date"></div>
+                        <div class="tooltip-row"><span class="tooltip-dot" style="background:#818cf8"></span><span>Portföy:</span><strong id="pf-tooltip-equity"></strong></div>
+                        <div class="tooltip-row"><span class="tooltip-dot" style="background:#f0b90b"></span><span>BTC:</span><strong id="pf-tooltip-btc"></strong></div>
+                        <div class="tooltip-row"><span class="tooltip-dot" style="background:#10b981"></span><span>USDT:</span><strong id="pf-tooltip-usdt"></strong></div>
+                        <div class="tooltip-row"><span class="tooltip-dot" style="background:#e2e8f0"></span><span>BTC Fiyat:</span><strong id="pf-tooltip-price"></strong></div>
+                    </div>
+                </section>
+
+                <!-- Trade History -->
+                <section class="panel panel-trades" id="pf-trades-panel">
+                    <h2 class="panel-title">İşlem Geçmişi</h2>
+                    <div class="table-wrap">
+                        <table class="trades-table">
+                            <thead><tr><th>Tarih</th><th>İşlem</th><th>Yön</th><th>BTC</th><th>USDT</th><th>Fiyat</th><th>Not</th></tr></thead>
+                            <tbody id="pf-trades-body"><tr><td colspan="7" class="empty-row">Henüz işlem yok</td></tr></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+
         <footer class="site-footer">
             <span>EVR Trading Platform &bull; 4 Durumlu Kantitatif Strateji &bull; MA_600 Korumali</span>
         </footer>
@@ -289,10 +391,10 @@
     <div id="toast" class="toast hidden"></div>
 
     <!-- Chart.js v4 CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
     <!-- Zoom Plugin (Drag-to-Zoom) -->
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" integrity="sha384-Cs3dgUx6+jDxxuqHvVH8Onpyj2LF1gKZurLDlhqzuJmUqVYMJ0THTWpxK5Z086Zm" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
     <script src="/static/app.js?v=3"></script>
 </body>
 </html>

@@ -5,10 +5,10 @@ Bu doküman, yapay zeka ajanının projeyi hatasız ve kurumsal standartlarda ge
 ## 🏗 İş Mimarisi (Business Logic)
 1. **Veri Kaynağı:** KMFG endeksi `kmquant.com/panel/panel.php` üzerinden `evr_scraper.py` vasıtasıyla çekilir.
 2. **Cloudflare Bypass:** Scraper; Playwright **KULLANMAZ!** Onun yerine `curl_cffi` (impersonate="chrome110") ve `capsolver` API Kullanarak Turnstile engelini geçer, arkadaki JSON veritabanına doğrudan saldırır.
-3. **DailyGuard Mekanizması:** En kritik risk kontrol kalkanıdır.
-   - **Kaldıraç Sınırı:** Maksimum 3x.
-   - **Limitler:** %1.5 Stop Loss, %3.0 Take Profit zorunludur.
-   - **Günlük Zarar Kes:** Üst üste 3 işlem Stop ile sonuçlanırsa, bot gün bitene kadar yeni işlem açmaz (Drawdown koruması).
+3. **Strateji ve Durum Makinesi:** Bot, **Spot BTC/USDT** üzerinde çalışan 4 durumlu (NORMAL, SHIELD, BLIND, RESTORE) makro bir swing botudur. Kaldıraç, sabit stop-loss veya take-profit **YOKTUR**.
+   - **NORMAL:** Fiyat MA600'ün üzerindeyken EVR kurallarına göre işlem yapılır (EVR <= 3.2 Al, EVR >= 8.5 Sat).
+   - **SHIELD:** Fiyat MA600'ün altına düştüğünde eldeki tüm BTC satılır ve nakit moduna geçilir.
+   - **Mükerrer İşlem Koruması:** Aynı gün içinde sadece tek başarılı al/sat işlemi gerçekleşir.
 
 ## 🧑‍💻 Yazılım Geliştirme Kuralları (Agent Rules)
 Ajan, geliştirme yaparken aşağıdaki kurallardan çıkmamalıdır:

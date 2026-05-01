@@ -18,7 +18,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
-from filelock import FileLock
+from filelock import FileLock, Timeout as FileLockTimeout
 from sqlalchemy import or_
 
 from evr_bot.config import (
@@ -27,6 +27,10 @@ from evr_bot.config import (
     LOG_FILE,
     SHIELD_CHECK_UTC_HOUR,
     SHIELD_CHECK_UTC_MINUTE,
+    EVR_CYCLE_RETRY_HOURS,
+    EVR_CYCLE_RETRY_MINUTES,
+    SHIELD_CHECK_RETRY_HOURS,
+    SHIELD_CHECK_RETRY_MINUTES,
 )
 from evr_bot.database import SessionLocal, init_db
 from evr_bot.models import SubscriptionStatus, User
@@ -125,30 +129,39 @@ def job_shield_check():
     logger.info("Aktif kullanici: %d", len(users))
     user_ids = [user.id for user in users]
 
+    data_dir = Path(os.getenv("DATA_DIR", str(Path(LOG_FILE).parent)))
+
     for uid in user_ids:
-        db_user = SessionLocal()
+        lock_path = data_dir / f"bot_user_{uid}.lock"
+        user_lock = FileLock(str(lock_path), timeout=0)
+
         try:
-            attached_user = db_user.query(User).get(uid)
-            if not attached_user:
-                continue
+            with user_lock:
+                db_user = SessionLocal()
+                try:
+                    attached_user = db_user.query(User).get(uid)
+                    if not attached_user:
+                        continue
 
-            logger.info("- Shield Check: %s (ID: %d) -", attached_user.email, attached_user.id)
-            engine = TradingEngine(db_user, attached_user)
-            result = engine.run_shield_check()
+                    logger.info("- Shield Check: %s (ID: %d) -", attached_user.email, attached_user.id)
+                    engine = TradingEngine(db_user, attached_user)
+                    result = engine.run_shield_check()
 
-            if result["success"]:
-                logger.info(
-                    "OK -> Durum=%s BTC=%.2f MA600=%.2f",
-                    result.get("state", "?"),
-                    result.get("btc_price", 0),
-                    result.get("ma600", 0),
-                )
-            else:
-                logger.error("HATA -> %s", result.get("error", "?"))
-        except Exception as exc:
-            logger.exception("Kullanici ID %d icin shield check hatasi: %s", uid, exc)
-        finally:
-            db_user.close()
+                    if result["success"]:
+                        logger.info(
+                            "OK -> Durum=%s BTC=%.2f MA600=%.2f",
+                            result.get("state", "?"),
+                            result.get("btc_price", 0),
+                            result.get("ma600", 0),
+                        )
+                    else:
+                        logger.error("HATA -> %s", result.get("error", "?"))
+                except Exception as exc:
+                    logger.exception("Kullanici ID %d icin shield check hatasi: %s", uid, exc)
+                finally:
+                    db_user.close()
+        except FileLockTimeout:
+            logger.warning("Kullanici ID %d icin baska bir job calisiyor, Shield Check atlandi.", uid)
 
     _write_heartbeat()
     logger.info("Shield check tamamlandi.")
@@ -175,30 +188,39 @@ def job_evr_cycle():
     logger.info("Aktif kullanici: %d", len(users))
     user_ids = [user.id for user in users]
 
+    data_dir = Path(os.getenv("DATA_DIR", str(Path(LOG_FILE).parent)))
+
     for uid in user_ids:
-        db_user = SessionLocal()
+        lock_path = data_dir / f"bot_user_{uid}.lock"
+        user_lock = FileLock(str(lock_path), timeout=0)
+
         try:
-            attached_user = db_user.query(User).get(uid)
-            if not attached_user:
-                continue
+            with user_lock:
+                db_user = SessionLocal()
+                try:
+                    attached_user = db_user.query(User).get(uid)
+                    if not attached_user:
+                        continue
 
-            logger.info("- EVR Cycle: %s (ID: %d) -", attached_user.email, attached_user.id)
-            engine = TradingEngine(db_user, attached_user)
-            result = engine.run_evr_cycle()
+                    logger.info("- EVR Cycle: %s (ID: %d) -", attached_user.email, attached_user.id)
+                    engine = TradingEngine(db_user, attached_user)
+                    result = engine.run_evr_cycle()
 
-            if result["success"]:
-                logger.info(
-                    "OK -> Durum=%s EVR=%.1f Aksiyon=%s",
-                    result.get("state", "?"),
-                    result.get("evr", 0),
-                    result.get("action", "?"),
-                )
-            else:
-                logger.error("HATA -> %s", result.get("error", "?"))
-        except Exception as exc:
-            logger.exception("Kullanici ID %d icin EVR cycle hatasi: %s", uid, exc)
-        finally:
-            db_user.close()
+                    if result["success"]:
+                        logger.info(
+                            "OK -> Durum=%s EVR=%.1f Aksiyon=%s",
+                            result.get("state", "?"),
+                            result.get("evr", 0),
+                            result.get("action", "?"),
+                        )
+                    else:
+                        logger.error("HATA -> %s", result.get("error", "?"))
+                except Exception as exc:
+                    logger.exception("Kullanici ID %d icin EVR cycle hatasi: %s", uid, exc)
+                finally:
+                    db_user.close()
+        except FileLockTimeout:
+            logger.warning("Kullanici ID %d icin baska bir job calisiyor, EVR Cycle atlandi.", uid)
 
     _write_heartbeat()
     logger.info("EVR cycle tamamlandi.")
@@ -229,7 +251,7 @@ def main():
                 else:
                     job_shield_check()
                     job_evr_cycle()
-        except TimeoutError:
+        except FileLockTimeout:
             logger.warning("Baska bir bot sureci calisiyor; tek seferlik komut atlandi.")
         return
 
@@ -255,10 +277,34 @@ def main():
         max_instances=1,
     )
 
+    for i, (h, m) in enumerate(zip(SHIELD_CHECK_RETRY_HOURS, SHIELD_CHECK_RETRY_MINUTES)):
+        scheduler.add_job(
+            job_shield_check,
+            CronTrigger(hour=h, minute=m),
+            id=f"shield_check_retry_{i}",
+            name=f"Referans Fiyat + Shield Kontrolu (Telafi {h:02d}:{m:02d})",
+            misfire_grace_time=3600,
+            max_instances=1,
+        )
+
+    for i, (h, m) in enumerate(zip(EVR_CYCLE_RETRY_HOURS, EVR_CYCLE_RETRY_MINUTES)):
+        scheduler.add_job(
+            job_evr_cycle,
+            CronTrigger(hour=h, minute=m),
+            id=f"evr_cycle_retry_{i}",
+            name=f"EVR Endeksi Kontrolu (Telafi {h:02d}:{m:02d})",
+            misfire_grace_time=3600,
+            max_instances=1,
+        )
+
     logger.info("=" * 70)
     logger.info("EVR Trading Bot - Scheduler baslatiliyor")
     logger.info("  Shield Check: Her gun UTC %02d:%02d", SHIELD_CHECK_UTC_HOUR, SHIELD_CHECK_UTC_MINUTE)
     logger.info("  EVR Cycle:    Her gun UTC %02d:%02d", EVR_CYCLE_UTC_HOUR, EVR_CYCLE_UTC_MINUTE)
+    for h, m in zip(SHIELD_CHECK_RETRY_HOURS, SHIELD_CHECK_RETRY_MINUTES):
+        logger.info("  Shield Check (Telafi): UTC %02d:%02d", h, m)
+    for h, m in zip(EVR_CYCLE_RETRY_HOURS, EVR_CYCLE_RETRY_MINUTES):
+        logger.info("  EVR Cycle (Telafi): UTC %02d:%02d", h, m)
     logger.info("=" * 70)
 
     try:
