@@ -40,6 +40,7 @@ BASE_DIR = Path(__file__).parent
 LOG_FILE = BASE_DIR / "daily_updater.log"
 
 SELF_HEALING_DAYS = 30
+EVR_BACKFILL_DAYS = int(os.getenv("EVR_BACKFILL_DAYS", "600"))
 
 # RotatingFileHandler: max 10MB, 5 yedek dosya
 _rotating_handler = logging.handlers.RotatingFileHandler(
@@ -236,8 +237,8 @@ def update():
         # ═══════════════════════════════════════════════════════════════════
         evr_records = []
         try:
-            logger.info("kmquant'tan son %d günün EVR verisi çekiliyor...", SELF_HEALING_DAYS)
-            evr_records = scrape(headless=True, last_n_days=SELF_HEALING_DAYS) or []
+            logger.info("kmquant'tan son %d günün EVR verisi çekiliyor...", EVR_BACKFILL_DAYS)
+            evr_records = scrape(headless=True, last_n_days=EVR_BACKFILL_DAYS) or []
             if evr_records:
                 logger.info("kmquant'tan %d günlük EVR verisi alındı.", len(evr_records))
             else:
@@ -259,8 +260,9 @@ def update():
         today_str = today_date.strftime("%Y-%m-%d")
 
         # Tüm mevcut tarihleri alıp genel boşluk taraması (Universal Gap Scan) yap
-        all_db_records = db.query(MarketData.date_str).all()
+        all_db_records = db.query(MarketData.date_str, MarketData.evr_raw).all()
         existing_dates = {r[0] for r in all_db_records if r[0]}
+        existing_evr_dates = {r[0] for r in all_db_records if r[0] and r[1] is not None}
 
         if existing_dates:
             min_date_str = min(existing_dates)
@@ -281,7 +283,8 @@ def update():
 
         if evr_records:
             for rec in evr_records:
-                target_dates.add(rec["date"])
+                if rec["date"] not in existing_evr_dates:
+                    target_dates.add(rec["date"])
 
         # EVR Backfill: Mevcut ama EVR'si NULL olan satırları da hedefle (Sadece son 30 gün)
         # NOT: Tüm geçmişin baştan taranmasını (universal scan) önlemek için stale_cutoff (30 gün) sınırı kesin olarak uygulanır.

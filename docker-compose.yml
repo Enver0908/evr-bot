@@ -37,7 +37,8 @@ services:
       --workers 1
       --log-level info
     ports:
-      - "127.0.0.1:8000:8000"
+      # Domain/Cloudflare olmadan VPS IP'si uzerinden erisim: http://SUNUCU_IP:8000
+      - "8000:8000"
     environment:
       DATABASE_URL: postgresql://evr:${POSTGRES_PASSWORD}@db:5432/evr_bot
       EVR_SECRET_KEY: ${EVR_SECRET_KEY:?EVR_SECRET_KEY tanimli degil!}
@@ -99,16 +100,6 @@ services:
       interval: 300s
       timeout: 10s
       retries: 3
-
-  # ─── Cloudflare Tunnel (Ücretsiz Public URL) ────────────────
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    restart: always
-    command: tunnel run
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Cloudflare tunnel token tanimli degil!}
-    depends_on:
-      - web
 
 volumes:
   pgdata:

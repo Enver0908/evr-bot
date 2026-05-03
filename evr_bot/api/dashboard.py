@@ -101,9 +101,20 @@ def get_chart_data(request: Request, db: Session = Depends(get_db)):
             
         dates = [r.date_str for r in records]
         btc_prices = [r.btc_price for r in records]
-        evr_raw = [r.evr_raw for r in records]
-        evr_index = [r.evr_index for r in records]
         ma_600 = [r.ma_600 for r in records]
+
+        # Grafik T-1 toleransi: KMQuant bugunun EVR'ini gec yayinladiginda
+        # cizgi kopmasin diye son bilinen onayli EVR degeri tasinir.
+        evr_raw = []
+        evr_index = []
+        last_known_raw = None
+        for r in records:
+            if r.evr_raw is not None:
+                last_known_raw = r.evr_raw
+
+            filled_raw = r.evr_raw if r.evr_raw is not None else last_known_raw
+            evr_raw.append(filled_raw)
+            evr_index.append(round(filled_raw / 10.0, 1) if filled_raw is not None else None)
         
         result = {
             "dates": dates,
