@@ -20,7 +20,6 @@ const $$ = (s) => document.querySelectorAll(s);
 const authScreen   = $('#auth-screen');
 const dashScreen    = $('#dashboard-screen');
 const loginForm     = $('#login-form');
-const registerForm  = $('#register-form');
 const authError     = $('#auth-error');
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -139,22 +138,6 @@ navTabs.forEach(tab => {
 
 // ─── Auth ───────────────────────────────────────────────────
 
-$$('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        $$('.auth-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const target = tab.dataset.tab;
-        if (target === 'login') {
-            loginForm.classList.add('active');
-            registerForm.classList.remove('active');
-        } else {
-            loginForm.classList.remove('active');
-            registerForm.classList.add('active');
-        }
-        authError.classList.add('hidden');
-    });
-});
-
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     authError.classList.add('hidden');
@@ -184,39 +167,6 @@ loginForm.addEventListener('submit', async (e) => {
         btn.disabled = false;
     }
 });
-
-registerForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    authError.classList.add('hidden');
-    const btn = registerForm.querySelector('.btn');
-    const span = btn.querySelector('span');
-    span.textContent = 'Kayit yapiliyor...';
-    btn.disabled = true;
-
-    try {
-        const data = await api('/register', 'POST', {
-            email: $('#reg-email').value,
-            password: $('#reg-password').value,
-        });
-        if (data.access_token) {
-            token = data.access_token;
-            localStorage.setItem('evr_token', token);
-            showToast('Kayit basarili!');
-            setTimeout(() => showDashboard(), 600);
-        } else {
-            showToast('Kayit basarili, lutfen giris yapin.');
-            $('[data-tab="login"]').click();
-        }
-    } catch (err) {
-        console.error('Register error:', err);
-        authError.textContent = err.message;
-        authError.classList.remove('hidden');
-    } finally {
-        span.textContent = 'Kayit Ol';
-        btn.disabled = false;
-    }
-});
-
 
 // ─── Logout ─────────────────────────────────────────────────
 
@@ -261,12 +211,6 @@ async function loadDashboard() {
 
 function renderLiveStatus(data, options = {}) {
     const preserveBotState = Boolean(options.preserveBotState);
-
-    // Simülasyon disclaimer — live-status verisi simülasyondur
-    const disclaimerEl = $('#simulation-disclaimer');
-    if (disclaimerEl && data.source === 'simulation' && !preserveBotState) {
-        disclaimerEl.classList.remove('hidden');
-    }
 
     // EVR karti
     if (data.action === 'SKIP') {
@@ -339,44 +283,12 @@ function renderLiveStatus(data, options = {}) {
 
 function renderDashboard(data) {
     const { user, bot_state, recent_trades } = data;
-    const isLifetime = Boolean(user.is_lifetime_member);
 
     // Nav
     $('#nav-email').textContent = user.email;
     const badge = $('#nav-sub-badge');
-    if (isLifetime) {
-        badge.textContent = 'Omur Boyu';
-        badge.className = 'sub-badge lifetime';
-    } else if (user.subscription_status === 'active') {
-        badge.textContent = 'Aktif';
-        badge.className = 'sub-badge active';
-    } else {
-        badge.textContent = 'Inaktif';
-        badge.className = 'sub-badge inactive';
-    }
-
-    // Subscription panel
-    const subText = $('#sub-status-text');
-    const subBtn = $('#btn-sub-toggle');
-    if (isLifetime) {
-        subText.textContent = 'Omur Boyu Erisim';
-        subText.style.color = 'var(--accent-indigo)';
-        subBtn.textContent = 'Kilidi Acik';
-        subBtn.className = 'btn btn-sm btn-ghost';
-        subBtn.disabled = true;
-    } else if (user.subscription_status === 'active') {
-        subText.textContent = 'Aktif';
-        subText.style.color = 'var(--accent-green)';
-        subBtn.textContent = 'Iptal Et';
-        subBtn.className = 'btn btn-sm btn-danger';
-        subBtn.disabled = false;
-    } else {
-        subText.textContent = 'Inaktif';
-        subText.style.color = 'var(--accent-red)';
-        subBtn.textContent = 'Aktif Et';
-        subBtn.className = 'btn btn-sm btn-accent';
-        subBtn.disabled = false;
-    }
+    badge.textContent = 'Yetkili';
+    badge.className = 'sub-badge lifetime';
 
     // API keys status
     const apiStatus = $('#api-keys-status');
@@ -427,9 +339,6 @@ function renderDashboard(data) {
             }
         }
 
-        // Bot state varsa simülasyon disclaimer'i gizle (gerçek veri gösteriliyor)
-        const disclaimerEl = $('#simulation-disclaimer');
-        if (disclaimerEl) disclaimerEl.classList.add('hidden');
     }
 
     // Trades table
@@ -768,23 +677,6 @@ if (btnZoomReset) {
 
 
 // ─── Settings Actions ───────────────────────────────────────
-
-$('#btn-sub-toggle').addEventListener('click', async () => {
-    if (currentUser && currentUser.user && currentUser.user.is_lifetime_member) {
-        showToast('Bu hesap omur boyu uyelikte.', 'success');
-        return;
-    }
-
-    try {
-        const isActive = currentUser && currentUser.user.subscription_status === 'active';
-        const endpoint = isActive ? '/subscription/deactivate' : '/subscription/activate';
-        const data = await api(endpoint, 'POST');
-        showToast(data.message);
-        loadDashboard();
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
-});
 
 $('#btn-save-keys').addEventListener('click', async () => {
     const apiKey = $('#input-api-key').value.trim();

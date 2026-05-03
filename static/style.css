@@ -897,13 +897,6 @@ body {
     margin-bottom: 12px;
 }
 
-.sub-status-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-#sub-status-text { font-weight: 600; font-size: 0.9rem; }
-
 .api-status {
     display: flex;
     align-items: center;

@@ -37,16 +37,18 @@ def get_dashboard(
     bot_state = None
     if user.bot_state:
         bs = user.bot_state
-        bot_state = BotStateResponse(
-            current_state=bs.current_state.name,
-            eski_zirve_fiyati=bs.eski_zirve_fiyati or 0.0,
-            breakdown_reference_price=bs.breakdown_reference_price or 0.0,
-            last_evr_value=bs.last_evr_value or 0.0,
-            last_btc_price=bs.last_btc_price or 0.0,
-            last_ma600=bs.last_ma600 or 0.0,
-            last_run_at=bs.last_run_at.isoformat() if bs.last_run_at else None,
-            shield_pending=bool(bs.shield_pending) if hasattr(bs, 'shield_pending') else False,
-        )
+        stale_state = bs.last_run_at is None or not bs.last_btc_price or not bs.last_ma600
+        if not stale_state:
+            bot_state = BotStateResponse(
+                current_state=bs.current_state.name,
+                eski_zirve_fiyati=bs.eski_zirve_fiyati or 0.0,
+                breakdown_reference_price=bs.breakdown_reference_price or 0.0,
+                last_evr_value=bs.last_evr_value or 0.0,
+                last_btc_price=bs.last_btc_price or 0.0,
+                last_ma600=bs.last_ma600 or 0.0,
+                last_run_at=bs.last_run_at.isoformat() if bs.last_run_at else None,
+                shield_pending=bool(bs.shield_pending) if hasattr(bs, 'shield_pending') else False,
+            )
 
     trades = (
         db.query(TradeLog)
@@ -80,6 +82,35 @@ def get_dashboard(
 
 
 _chart_cache = {"time": 0, "data": None}
+_live_status_cache = {"time": 0, "data": None}
+
+
+def _market_series(records):
+    """Return BTC, EVR, and MA600 series with DB MA fallback calculation."""
+    dates = [r.date_str for r in records]
+    btc_prices = [r.btc_price for r in records]
+
+    ma_600 = []
+    for i, r in enumerate(records):
+        computed_ma = None
+        if i >= MA_PERIOD - 1:
+            window = btc_prices[i - MA_PERIOD + 1: i + 1]
+            if all(price is not None for price in window):
+                computed_ma = round(sum(window) / MA_PERIOD, 2)
+        ma_600.append(r.ma_600 if r.ma_600 is not None else computed_ma)
+
+    evr_raw = []
+    evr_index = []
+    last_known_raw = None
+    for r in records:
+        if r.evr_raw is not None:
+            last_known_raw = r.evr_raw
+
+        filled_raw = r.evr_raw if r.evr_raw is not None else last_known_raw
+        evr_raw.append(filled_raw)
+        evr_index.append(round(filled_raw / 10.0, 1) if filled_raw is not None else None)
+
+    return dates, btc_prices, evr_raw, evr_index, ma_600
 
 @router.get("/api/chart-data")
 @limiter.limit("10/minute")
@@ -95,26 +126,17 @@ def get_chart_data(request: Request, db: Session = Depends(get_db)):
     from evr_bot.models import MarketData
     
     try:
-        records = db.query(MarketData).filter(MarketData.date_str >= "2021-05-01").order_by(MarketData.date_str.asc()).all()
+        records = db.query(MarketData).order_by(MarketData.date_str.asc()).all()
         if not records:
             raise HTTPException(status_code=404, detail="Veritabaninda piyasa verisi bulunamadi.")
             
-        dates = [r.date_str for r in records]
-        btc_prices = [r.btc_price for r in records]
-        ma_600 = [r.ma_600 for r in records]
-
-        # Grafik T-1 toleransi: KMQuant bugunun EVR'ini gec yayinladiginda
-        # cizgi kopmasin diye son bilinen onayli EVR degeri tasinir.
-        evr_raw = []
-        evr_index = []
-        last_known_raw = None
-        for r in records:
-            if r.evr_raw is not None:
-                last_known_raw = r.evr_raw
-
-            filled_raw = r.evr_raw if r.evr_raw is not None else last_known_raw
-            evr_raw.append(filled_raw)
-            evr_index.append(round(filled_raw / 10.0, 1) if filled_raw is not None else None)
+        dates, btc_prices, evr_raw, evr_index, ma_600 = _market_series(records)
+        display_start = next((i for i, date in enumerate(dates) if date >= "2021-05-01"), 0)
+        dates = dates[display_start:]
+        btc_prices = btc_prices[display_start:]
+        evr_raw = evr_raw[display_start:]
+        evr_index = evr_index[display_start:]
+        ma_600 = ma_600[display_start:]
         
         result = {
             "dates": dates,
@@ -148,9 +170,6 @@ def get_strategy_info():
         "min_order_usdt": MIN_ORDER_USDT,
     }
 
-
-_live_status_cache = {"time": 0, "data": None}
-
 @router.get("/api/live-status")
 @limiter.limit("10/minute")
 def get_live_status(request: Request, db: Session = Depends(get_db)):
@@ -174,18 +193,7 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
         if not valid_records:
             raise HTTPException(status_code=404, detail="Veritabaninda gecerli piyasa verisi yok.")
 
-        hist_dates = [r.date_str for r in valid_records]
-        hist_btc = [r.btc_price for r in valid_records]
-        # EVR None olabilir — güvenli okuma ile varsayılan 50 (Nötr) değeri atanır. T-1 Toleransı uygulanır.
-        hist_evr = []
-        for i, r in enumerate(valid_records):
-            if r.evr_raw is not None:
-                hist_evr.append(r.evr_raw)
-            else:
-                if i > 0 and valid_records[i-1].evr_raw is not None:
-                    hist_evr.append(valid_records[i-1].evr_raw)
-                else:
-                    hist_evr.append(50)
+        hist_dates, hist_btc, hist_evr, _hist_evr_index, hist_ma = _market_series(valid_records)
         
     except HTTPException:
         raise
@@ -196,13 +204,11 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
     last_date = hist_dates[-1]
     
     # T-1 Tolerance for Dashboard
-    last_evr_raw = valid_records[-1].evr_raw
-    if last_evr_raw is None and len(valid_records) >= 2:
-        last_evr_raw = valid_records[-2].evr_raw
-        
+    last_evr_raw = hist_evr[-1]
+
     last_evr = round(last_evr_raw / 10.0, 1) if last_evr_raw is not None else 5.0
     last_btc = hist_btc[-1]
-    ma600 = valid_records[-1].ma_600
+    ma600 = hist_ma[-1]
 
     state = "NORMAL"
     ath = 0.0
@@ -210,12 +216,9 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
 
     for i in range(len(hist_btc)):
         price = hist_btc[i]
-        evr_val = round(hist_evr[i] / 10.0, 1)
+        evr_val = round((hist_evr[i] if hist_evr[i] is not None else 50) / 10.0, 1)
 
-        if i >= MA_PERIOD - 1:
-            curr_ma = sum(hist_btc[i - MA_PERIOD + 1: i + 1]) / MA_PERIOD
-        else:
-            curr_ma = None
+        curr_ma = hist_ma[i]
 
         if state == "NORMAL" and price > ath:
             ath = price
@@ -232,6 +235,10 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
         elif state == "BLIND":
             if ath > 0 and price >= ath:
                 state = "NORMAL"
+
+    if ma600 is not None and last_btc < ma600 and last_evr != 0.0:
+        state = "SHIELD"
+        breakdown_ref = last_btc
 
     if last_evr_raw is None:
         action = "SKIP"

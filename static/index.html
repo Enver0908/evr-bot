@@ -42,11 +42,6 @@
             </div>
 
             <div class="auth-card">
-                <div class="auth-tabs">
-                    <button class="auth-tab active" data-tab="login" id="tab-login">Giris Yap</button>
-                    <button class="auth-tab" data-tab="register" id="tab-register">Kayit Ol</button>
-                </div>
-
                 <form id="login-form" class="auth-form active">
                     <div class="form-group">
                         <label for="login-email">E-posta</label>
@@ -58,21 +53,6 @@
                     </div>
                     <button type="submit" class="btn btn-primary btn-full" id="btn-login">
                         <span>Giris Yap</span>
-                        <div class="btn-loader hidden"></div>
-                    </button>
-                </form>
-
-                <form id="register-form" class="auth-form">
-                    <div class="form-group">
-                        <label for="reg-email">E-posta</label>
-                        <input type="email" id="reg-email" placeholder="ornek@email.com" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="reg-password">Sifre</label>
-                        <input type="password" id="reg-password" placeholder="••••••••" minlength="8" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-full" id="btn-register">
-                        <span>Kayit Ol</span>
                         <div class="btn-loader hidden"></div>
                     </button>
                 </form>
@@ -118,9 +98,6 @@
         <!-- ═══════════ DASHBOARD CONTENT ═══════════ -->
         <main class="dashboard-main" id="dashboard-content">
             <!-- Uyari Panelleri -->
-            <div id="simulation-disclaimer" class="alert-banner alert-info hidden">
-                ⚠ Asagidaki piyasa verileri tarihsel simulasyona dayalidir. Gercek bot durumu icin Dashboard'daki bot state bilgilerine bakiniz.
-            </div>
             <div id="shield-pending-warning" class="alert-banner alert-danger hidden">
                 🛡️ <strong>Kalkan Satisi Beklemede!</strong> — Onceki MA600 kiriliminda BTC satisi basarisiz oldu. Bot sonraki cycle'da tekrar deneyecek. Bybit hesabinizi ve API anahtarinizi kontrol edin.
             </div>
@@ -217,7 +194,6 @@
             <section class="bottom-row">
                 <div class="panel panel-settings" id="settings-panel">
                     <h2 class="panel-title">Ayarlar</h2>
-                    <div class="settings-section"><h3>Abonelik</h3><div class="sub-status-row"><span id="sub-status-text">Inaktif</span><button id="btn-sub-toggle" class="btn btn-sm btn-accent">Aktif Et</button></div></div>
                     <div class="settings-section">
                         <h3>Bybit API Anahtarlari</h3>
                         <div id="api-keys-status" class="api-status"><span class="api-dot red"></span><span>Tanimlanmadi</span></div>
