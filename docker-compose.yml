@@ -6,7 +6,6 @@
 #   2. bot      — 24 saat döngüde çalışan trading engine
 #   3. db       — PostgreSQL veritabanı
 #   4. updater  — SQL veritabanını günlük güncelleyen servis
-#   5. tunnel   — Cloudflare Tunnel (ücretsiz public URL)
 # ═══════════════════════════════════════════════════════════════
 
 services:

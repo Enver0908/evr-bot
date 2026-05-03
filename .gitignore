@@ -39,6 +39,16 @@ daily_updater.log
 # Kilit Dosyaları
 *.lock
 
+# Yedek Dosyaları
+*.dump
+
+# Heartbeat (Docker healthcheck geçici dosyaları)
+bot_heartbeat
+updater_heartbeat
+
+# Tarayıcı Profil Verileri (Scraper testi)
+_browser_data/
+
 # Sistem Dosyaları
 .DS_Store
 Thumbs.db
