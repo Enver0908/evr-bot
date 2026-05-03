@@ -99,16 +99,8 @@ def _market_series(records):
                 computed_ma = round(sum(window) / MA_PERIOD, 2)
         ma_600.append(r.ma_600 if r.ma_600 is not None else computed_ma)
 
-    evr_raw = []
-    evr_index = []
-    last_known_raw = None
-    for r in records:
-        if r.evr_raw is not None:
-            last_known_raw = r.evr_raw
-
-        filled_raw = r.evr_raw if r.evr_raw is not None else last_known_raw
-        evr_raw.append(filled_raw)
-        evr_index.append(round(filled_raw / 10.0, 1) if filled_raw is not None else None)
+    evr_raw = [r.evr_raw for r in records]
+    evr_index = [round(r.evr_raw / 10.0, 1) if r.evr_raw is not None else None for r in records]
 
     return dates, btc_prices, evr_raw, evr_index, ma_600
 
@@ -137,7 +129,21 @@ def get_chart_data(request: Request, db: Session = Depends(get_db)):
         evr_raw = evr_raw[display_start:]
         evr_index = evr_index[display_start:]
         ma_600 = ma_600[display_start:]
-        
+
+        # EVR verisi olan son tarihe kadar göster (forward-fill yok)
+        last_evr_idx = None
+        for idx in range(len(evr_raw) - 1, -1, -1):
+            if evr_raw[idx] is not None:
+                last_evr_idx = idx
+                break
+        if last_evr_idx is not None and last_evr_idx < len(dates) - 1:
+            trim = last_evr_idx + 1
+            dates = dates[:trim]
+            btc_prices = btc_prices[:trim]
+            evr_raw = evr_raw[:trim]
+            evr_index = evr_index[:trim]
+            ma_600 = ma_600[:trim]
+
         result = {
             "dates": dates,
             "btc_prices": btc_prices,
@@ -202,13 +208,19 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Veri okuma hatasi.")
 
     last_date = hist_dates[-1]
-    
-    # T-1 Tolerance for Dashboard
-    last_evr_raw = hist_evr[-1]
-
-    last_evr = round(last_evr_raw / 10.0, 1) if last_evr_raw is not None else 5.0
     last_btc = hist_btc[-1]
     ma600 = hist_ma[-1]
+
+    # EVR: forward-fill yok — son gerçek EVR verisini bul
+    last_evr_raw = hist_evr[-1]
+    evr_source_date = last_date
+    if last_evr_raw is None:
+        for idx in range(len(hist_evr) - 1, -1, -1):
+            if hist_evr[idx] is not None:
+                last_evr_raw = hist_evr[idx]
+                evr_source_date = hist_dates[idx]
+                break
+    last_evr = round(last_evr_raw / 10.0, 1) if last_evr_raw is not None else None
 
     state = "NORMAL"
     ath = 0.0
@@ -236,7 +248,7 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
             if ath > 0 and price >= ath:
                 state = "NORMAL"
 
-    if ma600 is not None and last_btc < ma600 and last_evr != 0.0:
+    if ma600 is not None and last_btc < ma600 and last_evr is not None and last_evr != 0.0:
         state = "SHIELD"
         breakdown_ref = last_btc
 
@@ -270,6 +282,7 @@ def get_live_status(request: Request, db: Session = Depends(get_db)):
         "btc_price": last_btc,
         "evr_raw": last_evr_raw,
         "evr_index": last_evr,
+        "evr_date": evr_source_date,
         "ma600": ma600,
         "state": state,
         "ath": round(ath, 2),

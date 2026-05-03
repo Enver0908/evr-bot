@@ -258,6 +258,19 @@ def main():
     logger.info("Scheduler lock bekleniyor: %s", _scheduler_lock_path())
     lock.acquire()
     logger.info("Scheduler lock alindi.")
+
+    # ── Startup Catch-Up: Kaçırılan günlük cycle'ı hemen çalıştır ──
+    # Bot geç restart olursa (ör: 20:35 UTC) o günün slotları kaçar.
+    # Bu blok başlangıçta tek seferlik cycle çalıştırır.
+    # Güvenlik: Freshness guard (stale veri → SKIP), Same-day guard (bugün zaten trade → SKIP)
+    logger.info("Startup catch-up: Bugunku cycle kontrol ediliyor...")
+    try:
+        job_shield_check()
+        job_evr_cycle()
+        logger.info("Startup catch-up tamamlandi.")
+    except Exception as exc:
+        logger.exception("Startup catch-up hatasi (scheduler etkilenmez): %s", exc)
+
     scheduler = BlockingScheduler(timezone="UTC")
 
     scheduler.add_job(
