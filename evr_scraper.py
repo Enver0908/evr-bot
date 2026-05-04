@@ -91,13 +91,30 @@ def scrape(headless: bool = True, last_n_days: int = 7) -> list[dict] | None:
         r_target = session.get("https://kmquant.com/app/btc.php?opt=KMFG", timeout=30)
         
         import re
-        jwt_match = re.search(r"jwtToken\s*=\s*['\"\"]([^'\"]+)['\"\"]", r_target.text)
-        if not jwt_match:
-            logger.error("JWT Token bulunamadi. Giris basarisiz veya hesap bloklu.")
+        # Birden fazla pattern dene (KMQuant sayfa yapısı değişmiş olabilir)
+        jwt_patterns = [
+            r"jwtToken\s*=\s*['\"]([^'\"]+)['\"]",
+            r"jwt_token\s*=\s*['\"]([^'\"]+)['\"]",
+            r"token\s*=\s*['\"]([^'\"]+)['\"]",
+            r"Authorization['\"]?\s*:\s*['\"]Bearer ([^'\"]+)['\"]",
+            r"Bearer ([A-Za-z0-9\-_\.]+)",
+            r"['\"]token['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        ]
+        kmfg_token = None
+        for pattern in jwt_patterns:
+            m = re.search(pattern, r_target.text)
+            if m:
+                kmfg_token = m.group(1)
+                logger.info("JWT Token bulundu (pattern: %s)", pattern[:40])
+                break
+        if not kmfg_token:
+            # Debug: sayfa içeriğinin ilk 2000 karakterini logla
+            preview = r_target.text[:2000].replace("\n", " ").replace("\r", "")
+            logger.error("JWT Token bulunamadi. HTTP status: %s", r_target.status_code)
+            logger.error("Sayfa preview (ilk 2000 kar): %s", preview)
             return None
-            
-        kmfg_token = jwt_match.group(1)
         
+
         # 4. Fetch JSON Data directly
         logger.info("Dogrudan KMFG veritabanindan Json verisi cekiliyor...")
         r_api = session.get(
