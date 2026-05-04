@@ -93,11 +93,12 @@ def scrape(headless: bool = True, last_n_days: int = 7) -> list[dict] | None:
         logger.info("Login POST tamamlandi. Final URL: %s | Status: %s | Cookies: %s",
                     login_resp.url, login_resp.status_code, list(session.cookies.keys()))
 
-        # Login basarisizsa (hala login formu donuyorsa) erken cik
-        if "cf-turnstile-response" in login_resp.text or "panel.php" in login_resp.url:
-            logger.error("Login basarisiz: Sunucu login formunu tekrar dondurdu. URL: %s", login_resp.url)
-            logger.error("Login response preview: %s", login_resp.text[:800].replace("\n", " "))
+        # Login basarisizsa (login_token cookie yoksa) erken cik
+        if "login_token" not in session.cookies:
+            logger.error("Login basarisiz: login_token cookie set edilmedi. Cookies: %s", list(session.cookies.keys()))
+            logger.error("Login response preview: %s", login_resp.text[:500].replace("\n", " "))
             return None
+        logger.info("Login basarili! login_token cookie alindi.")
 
         # 3. Get JWT Token
         logger.info("KMFG Grafik paneline erisim saglaniyor (Yetki Tokeni icin)...")
