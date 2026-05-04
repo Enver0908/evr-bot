@@ -73,7 +73,12 @@ def scrape(headless: bool = True, last_n_days: int = 7) -> list[dict] | None:
     try:
         logger.info("KMFG sistemine Chrome110 kimligiyle giris yapiliyor...")
         session = requests.Session(impersonate="chrome110")
-        session.post(
+
+        # Once login sayfasini GET et: session cookie kur
+        r_init = session.get("https://kmquant.com/panel/panel.php", timeout=30)
+        logger.info("Login sayfasi GET edildi. Status: %s | Cookies: %s", r_init.status_code, list(session.cookies.keys()))
+
+        login_resp = session.post(
             "https://kmquant.com/panel/panel.php",
             data={
                 "email": EMAIL,
@@ -85,10 +90,19 @@ def scrape(headless: bool = True, last_n_days: int = 7) -> list[dict] | None:
             allow_redirects=True,
             timeout=30
         )
+        logger.info("Login POST tamamlandi. Final URL: %s | Status: %s | Cookies: %s",
+                    login_resp.url, login_resp.status_code, list(session.cookies.keys()))
+
+        # Login basarisizsa (hala login formu donuyorsa) erken cik
+        if "cf-turnstile-response" in login_resp.text or "panel.php" in login_resp.url:
+            logger.error("Login basarisiz: Sunucu login formunu tekrar dondurdu. URL: %s", login_resp.url)
+            logger.error("Login response preview: %s", login_resp.text[:800].replace("\n", " "))
+            return None
 
         # 3. Get JWT Token
         logger.info("KMFG Grafik paneline erisim saglaniyor (Yetki Tokeni icin)...")
         r_target = session.get("https://kmquant.com/app/btc.php?opt=KMFG", timeout=30)
+        logger.info("btc.php GET edildi. Status: %s | URL: %s", r_target.status_code, r_target.url)
         
         import re
         # Birden fazla pattern dene (KMQuant sayfa yapısı değişmiş olabilir)
