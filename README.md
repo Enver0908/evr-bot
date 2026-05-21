@@ -74,17 +74,11 @@ The bot employs a microservice-style design, orchestrated via Docker Compose:
 
 ## Screenshots
 
-*Please place the actual screenshots of your running EVR Bot dashboard inside the repository.*
-
 1. **Dashboard Overview**:
    ![Dashboard Overview](static/dashboard_overview.png)
-   *The main interface displaying current trading state, live BTC/USDT price, MA600 threshold, cash/crypto balances, and recent transaction history.*
+   *The main interface displaying current trading state, live BTC/USDT price, MA600 threshold, cash/crypto balances, recent transaction history, and the EVR Total Map.*
 
-2. **Performance & Volatility Charts**:
-   ![Performance and Volatility Charts](static/performance_charts.png)
-   *Interactive Highcharts.js interface showing historical BTC price fluctuations plotted against the KMQuant EVR index scores and active buy/sell signals.*
-
-3. **Backtester Panel**:
+2. **Backtester Panel**:
    ![Backtest Simulation Engine](static/backtester_panel.png)
    *The custom backtesting tool loaded with historical data, allowing configuration of state metrics and simulation of strategy returns.*
 
