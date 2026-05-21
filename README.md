@@ -144,3 +144,5 @@ docker-compose logs -f
 
 ## Status
 Private Commercial Project / Production Pilot / Active Development
+
+Disclaimer: This project is an educational/technical portfolio project and does not provide financial advice.
